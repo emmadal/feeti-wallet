@@ -33,6 +33,7 @@ The system uses NATS as a message broker. The system listens to the following su
 - `wallet.withdraw`: Withdraw money from a wallet
 - `wallet.lock`: Lock a wallet
 - `wallet.unlock`: Unlock a wallet
+- `wallet.disable`: Disable a wallet
 
 ## Environment Variables
 

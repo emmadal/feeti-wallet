@@ -76,6 +76,7 @@ func NatsConnect() error {
 		// Only start subscribers if everything is set up correctly
 		if connectErr == nil {
 			subscribeToCreateWallet()
+			subscribeToDisableWallet()
 		}
 	})
 
@@ -100,11 +101,6 @@ type ResponsePayload struct {
 
 // subscribeToCreateWallet creates a wallet when a message is received
 func subscribeToCreateWallet() {
-	if nc == nil {
-		fmt.Println("Cannot subscribe: NATS connection not established")
-		return
-	}
-
 	// Subscribe to the "wallet.create" subject
 	sub, err := nc.Subscribe("wallet.create", func(msg *nats.Msg) {
 		startTime := time.Now()
@@ -142,6 +138,55 @@ func subscribeToCreateWallet() {
 			Data:    newWallet,
 		})
 	})
+	if err != nil {
+		fmt.Printf("Failed to subscribe to subject: %v\n", err)
+		return
+	}
+
+	// Keep subscription active - don't auto-unsubscribe
+	if err := sub.SetPendingLimits(-1, -1); err != nil {
+		fmt.Printf("Failed to set pending limits: %v\n", err)
+	}
+}
+
+func subscribeToDisableWallet() {
+	// Subscribe to the "wallet.disable" subject
+	sub, err := nc.Subscribe("wallet.disable", func(msg *nats.Msg) {
+		startTime := time.Now()
+		fmt.Printf("Received message [%s] on subject %s\n", string(msg.Data), msg.Subject)
+
+		// Parse the message payload
+		userId := string(msg.Data)
+		id, err := strconv.ParseInt(userId, 10, 64)
+		if err != nil {
+			fmt.Printf("Invalid user ID: %s\n", userId)
+			sendResponse(msg, ResponsePayload{
+				Success: false,
+				Error:   "Invalid user ID: must be a number",
+			})
+			return
+		}
+
+		// Create a wallet with a retry mechanism
+		wallet := models.Wallet{UserID: id}
+		err = wallet.DeleteWallet()
+		if err != nil {
+			log.Printf("Failed to disable wallet for user id [%d]: %v\n", id, err)
+			sendResponse(msg, ResponsePayload{
+				Success: false,
+				Error:   fmt.Sprintf("Failed to disable wallet for user id [%d]: %v", id, err),
+			})
+			return
+		}
+		fmt.Printf("Wallet for user id [%d] disabled successfully in  %v\n", id, time.Since(startTime))
+
+		// Send success response
+		sendResponse(msg, ResponsePayload{
+			Success: true,
+			Data:    nil,
+		})
+	})
+
 	if err != nil {
 		fmt.Printf("Failed to subscribe to subject: %v\n", err)
 		return

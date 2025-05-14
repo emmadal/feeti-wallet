@@ -273,7 +273,7 @@ func (w *Wallet) DeleteWallet() error {
 	// Delete wallet
 	_, err = tx.Exec(
 		ctx,
-		`UPDATE wallets SET is_active = false, locked = false WHERE user_id = $1`,
+		`UPDATE wallets SET is_active = false, locked = true WHERE user_id = $1`,
 		w.UserID,
 	)
 	if err != nil {
