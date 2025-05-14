@@ -74,11 +74,11 @@ func main() {
 	}
 
 	// v1 routes
-	v1.POST("/lock-wallet", controllers.LockWalletByUser)
-	v1.GET("/get-balance/:userID", controllers.GetBalanceByUser)
-	v1.POST("/topup-wallet", controllers.TopupWallet)
-	v1.POST("/withdrawal", controllers.WithdrawWallet)
-	v1.POST("/unlock-wallet", controllers.UnLockWalletByUser)
+	v1.POST("/lock", controllers.LockWalletByUser)
+	v1.GET("/balance/:userID", controllers.GetBalanceByUser)
+	v1.POST("/deposit", controllers.TopupWallet)
+	v1.POST("/withdraw", controllers.WithdrawWallet)
+	v1.POST("/unlock", controllers.UnLockWalletByUser)
 	v1.GET("/health", controllers.HealthCheck)
 
 	// Subscription is now handled inside NatsConnect
