@@ -38,7 +38,7 @@ WORKDIR /app
 COPY --from=builder /app/feeti-wallet /app/
 
 # Expose the port for the application
-EXPOSE 4000
+EXPOSE 3000
 
 # Run the Go binary
 CMD ["/app/feeti-wallet"]
