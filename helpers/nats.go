@@ -77,6 +77,7 @@ func NatsConnect() error {
 		if connectErr == nil {
 			subscribeToCreateWallet()
 			subscribeToDisableWallet()
+			subscribeToGetBalance()
 		}
 	})
 
@@ -184,6 +185,55 @@ func subscribeToDisableWallet() {
 		sendResponse(msg, ResponsePayload{
 			Success: true,
 			Data:    nil,
+		})
+	})
+
+	if err != nil {
+		fmt.Printf("Failed to subscribe to subject: %v\n", err)
+		return
+	}
+
+	// Keep subscription active - don't auto-unsubscribe
+	if err := sub.SetPendingLimits(-1, -1); err != nil {
+		fmt.Printf("Failed to set pending limits: %v\n", err)
+	}
+}
+
+func subscribeToGetBalance() {
+	// Subscribe to the "wallet.balance" subject
+	sub, err := nc.Subscribe("wallet.balance", func(msg *nats.Msg) {
+		startTime := time.Now()
+		fmt.Printf("Received message [%s] on subject %s\n", string(msg.Data), msg.Subject)
+
+		// Parse the message payload
+		userId := string(msg.Data)
+		id, err := strconv.ParseInt(userId, 10, 64)
+		if err != nil {
+			fmt.Printf("Invalid user ID: %s\n", userId)
+			sendResponse(msg, ResponsePayload{
+				Success: false,
+				Error:   "Invalid user ID: must be a number",
+			})
+			return
+		}
+
+		// Create a wallet with a retry mechanism
+		wallet := models.Wallet{UserID: id}
+		balance, err := wallet.GetBalance()
+		if err != nil {
+			log.Printf("Failed to get balance for user id [%d]: %v\n", id, err)
+			sendResponse(msg, ResponsePayload{
+				Success: false,
+				Error:   fmt.Sprintf("Failed to get balance for user id [%d]: %v", id, err),
+			})
+			return
+		}
+		fmt.Printf("Balance for user id [%d] retrieved successfully in  %v\n", id, time.Since(startTime))
+
+		// Send success response
+		sendResponse(msg, ResponsePayload{
+			Success: true,
+			Data:    balance,
 		})
 	})
 
