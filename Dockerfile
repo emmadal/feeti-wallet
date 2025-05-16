@@ -4,14 +4,14 @@ WORKDIR /app
 
 # Define build arguments
 ARG PORT
-ARG JWT_SECRET
+ARG JWT_KEY
 ARG GIN_MODE
 ARG NATS_URL
 ARG DATABASE_URL
 
 # Set environment variables for build
 ENV PORT=$PORT \
-    JWT_KEY=$JWT_SECRET \
+    JWT_KEY=$JWT_KEY \
     GIN_MODE=$GIN_MODE \
     DATABASE_URL=$DATABASE_URL \
     NATS_URL=$NATS_URL
