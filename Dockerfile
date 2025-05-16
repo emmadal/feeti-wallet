@@ -4,14 +4,12 @@ WORKDIR /app
 
 # Define build arguments
 ARG PORT
-ARG JWT_KEY
 ARG GIN_MODE
 ARG NATS_URL
 ARG DATABASE_URL
 
 # Set environment variables for build
 ENV PORT=$PORT \
-    JWT_KEY=$JWT_KEY \
     GIN_MODE=$GIN_MODE \
     DATABASE_URL=$DATABASE_URL \
     NATS_URL=$NATS_URL
@@ -35,8 +33,7 @@ WORKDIR /app
 COPY --from=builder /app/feeti-wallet-service /app/
 
 # Expose the port for the application
-EXPOSE 3000
+EXPOSE 4000
 
 # Run the Go binary
 CMD ["/app/feeti-wallet-service"]
-
