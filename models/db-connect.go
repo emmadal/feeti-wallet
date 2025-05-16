@@ -34,6 +34,8 @@ func DBConnect() {
 			// Ping the database to ensure the connection is valid
 			if err := DB.Ping(context.Background()); err != nil {
 				log.Fatalf("Unable to ping database: %v\n", err)
+			} else {
+				fmt.Println("Successfully pinged database")
 			}
 			// Create tables after a connection is established and assigned to DB
 			if err := createTables(); err != nil {

@@ -453,7 +453,7 @@ jobs:
           
             # Check service endpoints
             echo "Service endpoints:"
-            kubectl get endpoints wallet-service -n wallet-auth
+            kubectl get endpoints wallet-service -n feeti-wallet
           
             # Clean up temporary files
             cd / && rm -rf /tmp/k8s-deploy-${{ github.run_id }}
