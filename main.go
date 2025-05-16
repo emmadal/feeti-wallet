@@ -61,7 +61,7 @@ func main() {
 	server.Use(middleware.Recover())
 
 	// Set api version group
-	v1 := server.Group("/v1/api")
+	v1 := server.Group("/api/v1")
 
 	// initialize server
 	s := &http.Server{
@@ -114,7 +114,7 @@ func main() {
 	defer cancel()
 
 	// Drain NATS connection on shutdown
-	if err := helpers.DrainNatsConnection(); err != nil {
+	if err := helpers.DrainNatsConnection(context.Background()); err != nil {
 		log.Printf("Error draining NATS connection: %v\n", err)
 	} else {
 		log.Println("NATS connection drained successfully")
