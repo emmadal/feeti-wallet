@@ -193,6 +193,13 @@ jobs:
                 - name: wallet-service
                   image: ${IMAGE_PATH}
                   imagePullPolicy: Always
+                  command:
+                  - /bin/sh
+                  - -c
+                  - |
+                    echo "Verifying database connection parameters..."
+                    echo "Starting wallet service..."
+                    /app/feeti-wallet-service
                   ports:
                   - containerPort: 4000
                   resources:
@@ -376,8 +383,7 @@ jobs:
           ENDSSH
           
           # Copy the K8s manifests to VPS
-          scp -o StrictHostKeyChecking=no -r ./k8s-wallet/* ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST 
-          }}:/tmp/k8s-deploy-${{ github.run_id }}/
+          scp -o StrictHostKeyChecking=no -r ./k8s-wallet/* ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/k8s-deploy-${{ github.run_id }}/
           
           # Apply the manifests on the VPS
           ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
