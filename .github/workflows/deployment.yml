@@ -1,0 +1,519 @@
+# GitHub Actions workflow for building, pushing Docker image, and deploying to Kubernetes with secret automation
+name: Deployment
+
+on:
+  push:
+    branches:
+      - main  # Trigger on push to the main branch, adjust as needed
+  workflow_dispatch:  # Allow manual triggering of workflow
+
+jobs:
+  build-and-transfer:
+    name: Build Image
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.image_tag.outputs.tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Builds
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate image tag
+        id: image_tag
+        run: |
+          echo "tag=$(echo ${{ github.sha }} | head -c7)" >> $GITHUB_OUTPUT
+
+      - name: Build Docker image locally
+        run: |
+          # Build the docker image locally
+          docker build -t localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }} .
+          docker tag localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }} 
+          localhost:5000/feeti-wallet-service:latest
+          
+          # Save image to a tarball
+          mkdir -p ./docker-images
+          docker save localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }} | gzip > ./docker-images/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Transfer Docker image to VPS
+        run: |
+          # Transfer the image file to VPS
+          scp -o StrictHostKeyChecking=no ./docker-images/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/
+
+      - name: Load Docker image on VPS
+        run: |
+          # Connect to VPS and load the image
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+            # Load the Docker image
+            docker load < /tmp/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz
+          
+            # Remove the image file
+            rm /tmp/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz
+          
+            # Set up a local registry if not already running
+            docker ps | grep -q registry || docker run -d -p 5000:5000 --restart always --name registry registry:2
+          
+            # Tag and push to local registry
+            docker tag localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }} localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }}
+            docker push localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }}
+          
+            # Tag latest as well
+            docker tag localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }} localhost:5000/feeti-wallet-service:latest
+            docker push localhost:5000/feeti-wallet-service:latest
+          ENDSSH
+
+  deploy:
+    name: Deployment
+    needs: build-and-transfer
+    runs-on: ubuntu-latest
+    env:
+      IMAGE_TAG: ${{ needs.build-and-transfer.outputs.image_tag }}
+      IMAGE_PATH: localhost:5000/feeti-wallet-service:${{ needs.build-and-transfer.outputs.image_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Generate Kubernetes manifests
+        run: |
+          # Create manifests directory
+          mkdir -p ./k8s-wallet
+          
+          # Generate namespace.yaml
+          cat <<EOF > ./k8s-wallet/namespace.yaml
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: feeti-wallet
+          EOF
+          
+          # Generate configmap.yaml
+          cat <<EOF > ./k8s-wallet/configmap.yaml
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: wallet-config
+            namespace: feeti-wallet
+          data:
+            NODE_ENV: "production"
+            SERVICE_NAME: "wallet-service"
+            PORT: ":4000"
+            LOG_LEVEL: "info"
+          EOF
+          
+          # Generate network-policy.yaml
+          cat <<EOF > ./k8s-wallet/network-policy.yaml
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata:
+            name: wallet-service-network-policy
+            namespace: feeti-wallet
+          spec:
+            podSelector:
+              matchLabels:
+                app: wallet-service
+            policyTypes:
+            - Ingress
+            - Egress
+            ingress:
+            - from:
+              - namespaceSelector:
+                  matchLabels:
+                    name: ingress-nginx
+              ports:
+              - protocol: TCP
+                port: 4000
+            - ports:
+              - protocol: TCP
+                port: 4000
+            egress:
+            - to:
+              - ipBlock:
+                  cidr: 0.0.0.0/0
+                  except:
+                  - 169.254.0.0/16
+                  - 172.16.0.0/12
+                  - 192.168.0.0/16
+              ports:
+              - protocol: TCP
+                port: 5432  # PostgreSQL
+              - protocol: TCP
+                port: 4222  # NATS
+              - protocol: TCP
+                port: 4000  # HTTP
+          EOF
+          
+          # Generate auth-service.yaml
+          cat <<EOF > ./k8s-wallet/auth-service.yaml
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: wallet-service
+            namespace: feeti-wallet
+            annotations:
+              service.beta.kubernetes.io/external-traffic: "OnlyLocal"
+          spec:
+            selector:
+              app: auth-service
+            ports:
+            - name: http
+              port: 4000
+              targetPort: 4000
+              nodePort: 30100
+              protocol: TCP
+            type: LoadBalancer
+            externalIPs:
+            - 84.247.138.198  
+          EOF
+          
+          # Generate auth-deployment.yaml - using locally available image
+          cat <<EOF > ./k8s-wallet/auth-deployment.yaml
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: wallet-service
+            namespace: feeti-wallet
+            annotations:
+              kubernetes.io/change-cause: "Deployed by GitHub Actions - ${IMAGE_TAG}"
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: wallet-service
+            template:
+              metadata:
+                labels:
+                  app: wallet-service
+              spec:
+                containers:
+                - name: wallet-service
+                  image: ${IMAGE_PATH}
+                  imagePullPolicy: Always
+                  ports:
+                  - containerPort: 4000
+                  resources:
+                    limits:
+                      cpu: "0.5"
+                      memory: "512Mi"
+                    requests:
+                      cpu: "0.2"
+                      memory: "256Mi"
+                  env:
+                  - name: PORT
+                    value: ":4000"
+                  - name: NODE_ENV
+                    valueFrom:
+                      configMapKeyRef:
+                        name: wallet-config
+                        key: NODE_ENV
+                  - name: SERVICE_NAME
+                    valueFrom:
+                      configMapKeyRef:
+                        name: wallet-config
+                        key: SERVICE_NAME
+                  - name: JWT_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: wallet-secrets
+                        key: JWT_KEY
+                  - name: NATS_URL
+                    valueFrom:
+                      secretKeyRef:
+                        name: wallet-secrets
+                        key: NATS_URL
+                  - name: GIN_MODE
+                    valueFrom:
+                      secretKeyRef:
+                        name: wallet-secrets
+                        key: GIN_MODE
+                  - name: DATABASE_URL
+                    valueFrom:
+                      secretKeyRef:
+                        name: wallet-secrets
+                        key: DATABASE_URL
+                  startupProbe:
+                    httpGet:
+                      path: /api/v1/healthz
+                      port: 4000
+                    initialDelaySeconds: 10
+                    periodSeconds: 5
+                    timeoutSeconds: 3
+                    failureThreshold: 30
+                  livenessProbe:
+                    httpGet:
+                      path: /api/v1/healthz
+                      port: 4000
+                    initialDelaySeconds: 60
+                    periodSeconds: 20
+                    timeoutSeconds: 5
+                    failureThreshold: 5
+                  readinessProbe:
+                    httpGet:
+                      path: /api/v1/healthz
+                      port: 4000
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+                    timeoutSeconds: 5
+                    failureThreshold: 3
+          EOF
+          
+          # Generate auth-ingress.yaml
+          cat <<EOF > ./k8s-wallet/auth-ingress.yaml
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: wallet-ingress
+            namespace: feeti-wallet
+            annotations:
+              nginx.ingress.kubernetes.io/ssl-redirect: "true"
+              cert-manager.io/cluster-issuer: letsencrypt-prod
+          spec:
+            ingressClassName: nginx
+            tls:
+            - hosts:
+              - wallet.feeti.app
+              secretName: auth-tls
+            rules:
+            - host: wallet.feeti.app
+              http:
+                paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: wallet-service
+                      port:
+                        number: 4000
+          EOF
+          
+          # Generate auth-hpa.yaml
+          cat <<EOF > ./k8s-wallet/auth-hpa.yaml
+          apiVersion: autoscaling/v2
+          kind: HorizontalPodAutoscaler
+          metadata:
+            name: wallet-hpa
+            namespace: feeti-wallet
+          spec:
+            scaleTargetRef:
+              apiVersion: apps/v1
+              kind: Deployment
+              name: wallet-service
+            minReplicas: 1
+            maxReplicas: 4
+            metrics:
+            - type: Resource
+              resource:
+                name: cpu
+                target:
+                  type: Utilization
+                  averageUtilization: 70
+            - type: Resource
+              resource:
+                name: memory
+                target:
+                  type: Utilization
+                  averageUtilization: 80
+          EOF
+          
+          # Generate health-check.yaml
+          cat <<EOF > ./k8s-wallet/health-check.yaml
+          apiVersion: batch/v1
+          kind: CronJob
+          metadata:
+            name: wallet-health-check
+            namespace: feeti-wallet
+          spec:
+            schedule: "*/15 * * * *"
+            successfulJobsHistoryLimit: 1
+            failedJobsHistoryLimit: 3
+            jobTemplate:
+              spec:
+                template:
+                  spec:
+                    containers:
+                    - name: health-check
+                      image: curlimages/curl:7.83.1
+                      command:
+                      - /bin/sh
+                      - -c
+                      - |
+                        if curl -s -o /dev/null -w "%{http_code}" http://wallet-service:4000/api/v1/healthz | grep -q
+          200; then
+                          echo "Health check passed"
+                          exit 0
+                        else
+                          echo "Health check failed"
+                          exit 1
+                        fi
+                    restartPolicy: OnFailure
+          EOF
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Clean up old deployments
+        run: |
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+            # Delete all existing deployments and pods
+            echo "Cleaning up old deployments..."
+            kubectl get namespace feeti-wallet >/dev/null 2>&1 && {
+              kubectl delete deployment --all -n feeti-wallet
+              kubectl delete pods --all -n feeti-wallet --force --grace-period=0
+              sleep 10
+            } || echo "Namespace does not exist yet"
+          ENDSSH
+
+      - name: Apply Kubernetes manifests and configure
+        run: |
+          # Create a temporary directory for manifests
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+            mkdir -p /tmp/k8s-deploy-${{ github.run_id }}
+          ENDSSH
+          
+          # Copy the K8s manifests to VPS
+          scp -o StrictHostKeyChecking=no -r ./k8s-wallet/* ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST 
+          }}:/tmp/k8s-deploy-${{ github.run_id }}/
+          
+          # Apply the manifests on the VPS
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+            cd /tmp/k8s-deploy-${{ github.run_id }}
+          
+            # Create namespace if it doesn't exist
+            kubectl get namespace feeti-wallet >/dev/null 2>&1 || kubectl apply -f namespace.yaml
+            kubectl config set-context --current --namespace=feeti-wallet
+          
+            # Apply ConfigMap
+            kubectl apply -f configmap.yaml
+          
+            # Create or update Kubernetes secrets
+            kubectl create secret generic auth-secrets \
+              --namespace=feeti-wallet \
+              --from-literal=JWT_KEY='${{ secrets.JWT_KEY }}' \
+              --from-literal=DATABASE_URL='${{ secrets.DATABASE_URL }}' \
+              --from-literal=NATS_URL='${{ secrets.NATS_URL }}' \
+              --from-literal=GIN_MODE='release' \
+              --from-literal=PORT=':4000' \
+              --dry-run=client -o yaml | kubectl apply -f -
+          
+            # Apply the rest of the manifests
+            kubectl apply -f network-policy.yaml
+            kubectl apply -f auth-service.yaml
+          
+            # Ensure firewall allows NodePort access
+            sudo ufw allow 30100/tcp || true
+          
+            # Apply the deployment last (after services and everything else is ready)
+            kubectl apply -f auth-deployment.yaml
+          
+            # Apply ingress and other resources
+            kubectl apply -f auth-ingress.yaml
+            kubectl apply -f auth-hpa.yaml
+            kubectl apply -f health-check.yaml
+          ENDSSH
+
+      - name: Monitor deployment
+        run: |
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+            # Wait for deployment to start
+            echo "Waiting for pods to be created..."
+            sleep 20
+          
+            # Show all resources in the namespace
+            echo "Current resources in namespace:"
+            kubectl get all -n feeti-wallet
+          
+            # Check pod logs
+            echo "Checking pod logs for errors:"
+            POD=$(kubectl get pods -n feeti-wallet -l app=auth-service -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo '')
+            if [ -n "$POD" ]; then
+              echo "Pod found: $POD"
+              echo "Pod logs:"
+              kubectl logs -n feeti-wallet $POD || echo "No logs available"
+          
+              echo "Pod environment variables:"
+              kubectl exec -n feeti-wallet $POD -c auth-service -- env 2>/dev/null || echo "Could not get environment variables"
+            else
+              echo "No pods found yet"
+            fi
+          
+            # Wait for deployment to complete with increased timeout
+            echo "Waiting for deployment to complete..."
+            kubectl rollout status deployment/auth-service --timeout=600s || true
+          
+            # Get final status
+            echo "Final pod status:"
+            kubectl get pods -n feeti-wallet
+          
+            # Check service endpoints
+            echo "Service endpoints:"
+            kubectl get endpoints wallet-service -n wallet-auth
+          
+            # Clean up temporary files
+            cd / && rm -rf /tmp/k8s-deploy-${{ github.run_id }}
+          ENDSSH
+
+      - name: Verify service configuration and accessibility
+        run: |
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+            echo "=== DETAILED SERVICE VERIFICATION ==="
+          
+            # Ensure all ports are open
+            echo "Opening firewall ports..."
+            sudo ufw allow 4000/tcp || echo "Failed to open port 4000, may require manual intervention"
+            sudo ufw allow 30100/tcp || echo "Failed to open port 30100, may require manual intervention"
+            sudo ufw status | grep 30100
+          
+            # Verify that the service is running correctly
+            echo "Verifying service status..."
+            kubectl get svc -n feeti-wallet wallet-service -o wide
+            kubectl describe svc -n feeti-wallet wallet-service
+          
+            # Check node status and addresses
+            echo "Checking node status and networking..."
+            kubectl get nodes -o wide
+          
+            # Check pod status and get container logs
+            echo "Checking wallet-service pod status..."
+            POD_NAME=$(kubectl get pods -n feeti-wallet -l app=wallet-service -o jsonpath="{.items[0].metadata.name}")
+            kubectl describe pod -n feeti-wallet $POD_NAME
+          
+            # Test service connectivity internally
+            echo "Testing service connectivity from inside the cluster..."
+            kubectl run curl-test --image=curlimages/curl -n feeti-wallet --rm -it --restart=Never -- curl -v 
+          http://wallet-service:4000/api/v1/healthz || echo "Internal service test failed, check logs"
+          
+            # Create NodePort diagnostic info
+            echo "NodePort access should be available at: http://84.247.138.198:30100/api/v1/healthz"
+            echo "Running netstat to verify port binding..."
+            sudo netstat -tulpn | grep 30100 || echo "Port 30100 not bound to any process, check kube-proxy"
+          
+            # Show how to test externally
+            echo "To test from your machine, run: curl -v http://84.247.138.198:30100/api/v1/healthz"
+          
+            # Try to connect locally
+            echo "Testing locally on server..."
+            curl -v http://localhost:30100/api/v1/healthz || echo "Local test failed"
+          ENDSSH
+
+  notify:
+    name: Send Notification
+    needs: [build-and-transfer, deploy]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Notify deployment result
+        run: |
+          if [[ "${{ needs.deploy.result }}" == "success" ]]; then
+            echo "✅ Deployment successful - New version of feeti-wallet-service is live"
+            # You could add actual notification code here (Slack, Email, etc.)
+          else
+            echo "❌ Deployment failed - Check workflow logs for details"
+            # You could add actual notification code here (Slack, Email, etc.)
+          fi
