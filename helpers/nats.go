@@ -37,7 +37,7 @@ func defaultNatsConfig() NatsConfig {
 	}
 	return NatsConfig{
 		URL:           natsURL,
-		MaxReconnects: 5,
+		MaxReconnects: 60,
 		ReconnectWait: 5 * time.Second,
 		Replicas:      1,
 	}
@@ -54,7 +54,7 @@ func NatsConnect() error {
 		// Load configuration from environment
 		config := defaultNatsConfig()
 
-		log.Printf("Connecting to NATS server at %s\n", config.URL)
+		log.Println("Connecting to NATS server...")
 
 		// Connect to NATS
 		nc, connectErr = nats.Connect(
@@ -66,7 +66,7 @@ func NatsConnect() error {
 				log.Printf("NATS disconnected: %v\n", err)
 			}),
 			nats.ReconnectHandler(func(nc *nats.Conn) {
-				log.Printf("NATS reconnection attempt to %s\n", nc.ConnectedUrl())
+				log.Println("NATS reconnection attempt...")
 			}),
 			nats.ErrorHandler(func(nc *nats.Conn, sub *nats.Subscription, err error) {
 				if sub != nil {
@@ -177,22 +177,6 @@ func DrainNatsConnection(ctx context.Context) error {
 		log.Println("NATS drain timeout, forcing close")
 		nc.Close()
 		return nil
-	}
-}
-
-// WaitForNatsInit waits for NATS initialization to complete with timeout
-func WaitForNatsInit(timeout time.Duration) bool {
-	c := make(chan struct{})
-	go func() {
-		initDone.Wait()
-		close(c)
-	}()
-
-	select {
-	case <-c:
-		return true
-	case <-time.After(timeout):
-		return false
 	}
 }
 
