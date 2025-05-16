@@ -341,8 +341,7 @@ jobs:
                       - /bin/sh
                       - -c
                       - |
-                        if curl -s -o /dev/null -w "%{http_code}" http://wallet-service:4000/api/v1/healthz | grep -q
-          200; then
+                        if curl -s -o /dev/null -w "%{http_code}" http://wallet-service:4000/api/v1/healthz | grep -q 200; then
                           echo "Health check passed"
                           exit 0
                         else

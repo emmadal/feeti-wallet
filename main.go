@@ -79,7 +79,7 @@ func main() {
 	v1.POST("/deposit", controllers.TopupWallet)
 	v1.POST("/withdraw", controllers.WithdrawWallet)
 	v1.POST("/unlock", controllers.UnLockWalletByUser)
-	v1.GET("/health", controllers.HealthCheck)
+	v1.GET("/healthz", controllers.HealthCheck)
 
 	// Subscription is now handled inside NatsConnect
 	if err := helpers.NatsConnect(); err != nil {
