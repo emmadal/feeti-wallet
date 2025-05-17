@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	jwt "github.com/emmadal/feeti-module/jwt_module"
 	"github.com/emmadal/feeti-wallet/controllers"
 	"github.com/emmadal/feeti-wallet/helpers"
 	"github.com/emmadal/feeti-wallet/middleware"
@@ -74,12 +75,13 @@ func main() {
 	}
 
 	// v1 routes
-	v1.POST("/lock", controllers.LockWalletByUser)
-	v1.GET("/balance/:userID", controllers.GetBalanceByUser)
-	v1.POST("/deposit", controllers.TopupWallet)
-	v1.POST("/withdraw", controllers.WithdrawWallet)
-	v1.POST("/unlock", controllers.UnLockWalletByUser)
+	jwtKey := []byte(os.Getenv("JWT_KEY"))
 	v1.GET("/healthz", controllers.HealthCheck)
+	v1.POST("/lock", jwt.AuthGin(jwtKey), controllers.LockWalletByUser)
+	v1.GET("/balance/:userID", jwt.AuthGin(jwtKey), controllers.GetBalanceByUser)
+	v1.POST("/deposit", jwt.AuthGin(jwtKey), controllers.TopupWallet)
+	v1.POST("/withdraw", jwt.AuthGin(jwtKey), controllers.WithdrawWallet)
+	v1.POST("/unlock", jwt.AuthGin(jwtKey), controllers.UnLockWalletByUser)
 
 	// Subscription is now handled inside NatsConnect
 	if err := helpers.NatsConnect(); err != nil {

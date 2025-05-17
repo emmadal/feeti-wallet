@@ -5,12 +5,14 @@ WORKDIR /app
 # Define build arguments
 ARG PORT
 ARG GIN_MODE
+ARG HOST
 ARG NATS_URL
 ARG DATABASE_URL
 
 # Set environment variables for build
 ENV PORT=$PORT \
     GIN_MODE=$GIN_MODE \
+    HOST=$HOST \
     DATABASE_URL=$DATABASE_URL \
     NATS_URL=$NATS_URL
 

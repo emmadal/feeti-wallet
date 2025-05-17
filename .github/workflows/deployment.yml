@@ -227,6 +227,11 @@ jobs:
                       secretKeyRef:
                         name: auth-secrets
                         key: JWT_KEY
+                  - name: HOST
+                    valueFrom:
+                      secretKeyRef:
+                        name: auth-secrets
+                        key: HOST
                   - name: NATS_URL
                     valueFrom:
                       secretKeyRef:
@@ -402,6 +407,7 @@ jobs:
               --from-literal=JWT_KEY='${{ secrets.JWT_KEY }}' \
               --from-literal=DATABASE_URL='${{ secrets.DATABASE_URL }}' \
               --from-literal=NATS_URL='${{ secrets.NATS_URL }}' \
+              --from-literal=NATS_URL='${{ secrets.HOST }}' \
               --from-literal=GIN_MODE='release' \
               --from-literal=PORT=':4000' \
               --dry-run=client -o yaml | kubectl apply -f -
