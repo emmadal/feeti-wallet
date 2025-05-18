@@ -23,10 +23,12 @@ jobs:
       - name: Generate image tag
         id: image_tag
         run: |
+          set -euo pipefail
           echo "tag=$(echo ${{ github.sha }} | head -c7)" >> $GITHUB_OUTPUT
 
       - name: Build Docker image locally
         run: |
+          set -euo pipefail
           # Build the docker image locally
           docker build -t localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }} .
           docker tag localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }} localhost:5000/feeti-wallet-service:latest
@@ -47,8 +49,10 @@ jobs:
 
       - name: Load Docker image on VPS
         run: |
+          set -euo pipefail
           # Connect to VPS and load the image
           ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+            set -euo pipefail
             # Load the Docker image
             docker load < /tmp/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz
           
@@ -65,6 +69,10 @@ jobs:
             # Tag latest as well
             docker tag localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }} localhost:5000/feeti-wallet-service:latest
             docker push localhost:5000/feeti-wallet-service:latest
+
+            # Prune old images (keep only last 5)
+            docker images "localhost:5000/feeti-wallet-service" --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" | \
+              sort -rk2 | tail -n +6 | awk '{print $1}' | xargs -r docker rmi || true
           ENDSSH
 
   deploy:
@@ -80,6 +88,7 @@ jobs:
 
       - name: Generate Kubernetes manifests
         run: |
+          set -euo pipefail
           # Create manifests directory
           mkdir -p ./k8s-wallet
           
@@ -227,11 +236,11 @@ jobs:
                       secretKeyRef:
                         name: auth-secrets
                         key: JWT_KEY
-                  - name: HOST
+                  - name: HOST_URL
                     valueFrom:
                       secretKeyRef:
                         name: auth-secrets
-                        key: HOST
+                        key: HOST_URL
                   - name: NATS_URL
                     valueFrom:
                       secretKeyRef:
@@ -370,20 +379,14 @@ jobs:
 
       - name: Clean up old deployments
         run: |
-          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
-            # Delete all existing deployments and pods
-            echo "Cleaning up old deployments..."
-            kubectl get namespace feeti-wallet >/dev/null 2>&1 && {
-              kubectl delete deployment --all -n feeti-wallet
-              kubectl delete pods --all -n feeti-wallet --force --grace-period=0
-              sleep 10
-            } || echo "Namespace does not exist yet"
-          ENDSSH
+          echo "[SKIPPED] No destructive cleanup. Resources will be created or updated as needed."
 
       - name: Apply Kubernetes manifests and configure
         run: |
+          set -euo pipefail
           # Create a temporary directory for manifests
           ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+            set -euo pipefail
             mkdir -p /tmp/k8s-deploy-${{ github.run_id }}
           ENDSSH
           
@@ -392,6 +395,7 @@ jobs:
           
           # Apply the manifests on the VPS
           ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+            set -euo pipefail
             cd /tmp/k8s-deploy-${{ github.run_id }}
           
             # Create namespace if it doesn't exist
@@ -407,7 +411,7 @@ jobs:
               --from-literal=JWT_KEY='${{ secrets.JWT_KEY }}' \
               --from-literal=DATABASE_URL='${{ secrets.DATABASE_URL }}' \
               --from-literal=NATS_URL='${{ secrets.NATS_URL }}' \
-              --from-literal=NATS_URL='${{ secrets.HOST }}' \
+              --from-literal=HOST_URL='${{ secrets.HOST_URL }}' \
               --from-literal=GIN_MODE='release' \
               --from-literal=PORT=':4000' \
               --dry-run=client -o yaml | kubectl apply -f -
@@ -421,6 +425,8 @@ jobs:
           
             # Apply the deployment last (after services and everything else is ready)
             kubectl apply -f auth-deployment.yaml
+            echo "Waiting for deployment rollout to complete..."
+            kubectl rollout status deployment/wallet-service --timeout=600s || { echo "Deployment failed"; exit 1; }
           
             # Apply ingress and other resources
             kubectl apply -f auth-ingress.yaml
@@ -430,7 +436,9 @@ jobs:
 
       - name: Monitor deployment
         run: |
+          set -euo pipefail
           ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+            set -euo pipefail
             # Wait for deployment to start
             echo "Waiting for pods to be created..."
             sleep 20
@@ -441,16 +449,14 @@ jobs:
           
             # Check pod logs
             echo "Checking pod logs for errors:"
-            POD=$(kubectl get pods -n feeti-wallet -l app=wallet-service -o jsonpath='{.items[0].metadata.name}' 
-          2>/dev/null || echo '')
+            POD=$(kubectl get pods -n feeti-wallet -l app=wallet-service -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo '')
             if [ -n "$POD" ]; then
               echo "Pod found: $POD"
               echo "Pod logs:"
               kubectl logs -n feeti-wallet $POD || echo "No logs available"
           
               echo "Pod environment variables:"
-              kubectl exec -n feeti-wallet $POD -c wallet-service -- env 2>/dev/null || echo "Could not get environment 
-          variables"
+              kubectl exec -n feeti-wallet $POD -c wallet-service -- env 2>/dev/null || echo "Could not get environment variables"
             else
               echo "No pods found yet"
             fi
@@ -473,7 +479,9 @@ jobs:
 
       - name: Verify service configuration and accessibility
         run: |
+          set -euo pipefail
           ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+            set -euo pipefail
             echo "=== DETAILED SERVICE VERIFICATION ==="
           
             # Ensure all ports are open
@@ -498,8 +506,7 @@ jobs:
           
             # Test service connectivity internally
             echo "Testing service connectivity from inside the cluster..."
-            kubectl run curl-test --image=curlimages/curl -n feeti-wallet --rm -it --restart=Never -- curl -v 
-          http://wallet-service:4000/api/v1/healthz || echo "Internal service test failed, check logs"
+            kubectl run curl-test --image=curlimages/curl -n feeti-wallet --rm -it --restart=Never -- curl -v http://wallet-service:4000/api/v1/healthz || echo "Internal service test failed, check logs"
           
             # Create NodePort diagnostic info
             echo "NodePort access should be available at: http://84.247.138.198:30100/api/v1/healthz"
