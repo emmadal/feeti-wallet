@@ -91,7 +91,7 @@ func NatsConnect() error {
 		// Only start subscribers if everything is set up correctly
 		// Use a WaitGroup to track when all subscriptions are ready
 		var subWg sync.WaitGroup
-		subWg.Add(3) // We have 3 subscriptions
+		subWg.Add(6) // We have 6 subscriptions
 
 		go func() {
 			// Catch subscription panics to prevent goroutine crashes
@@ -108,9 +108,15 @@ func NatsConnect() error {
 			err1 := subscribeToCreateWallet(&subWg)
 			err2 := subscribeToDisableWallet(&subWg)
 			err3 := subscribeToGetBalance(&subWg)
+			err4 := subscribeToCheckBalance(&subWg)
+			err5 := subscribeToDeposit(&subWg)
+			err6 := subscribeToWithdraw(&subWg)
+
+			// Wait for all subscriptions to be ready
+			subWg.Wait()
 
 			// Check for errors
-			for i, err := range []error{err1, err2, err3} {
+			for i, err := range []error{err1, err2, err3, err4, err5, err6} {
 				if err != nil {
 					subject := ""
 					switch i {
@@ -120,13 +126,16 @@ func NatsConnect() error {
 						subject = "wallet.disable"
 					case 2:
 						subject = "wallet.balance"
+					case 3:
+						subject = "wallet.check_balance"
+					case 4:
+						subject = "wallet.deposit"
+					case 5:
+						subject = "wallet.withdraw"
 					}
 					log.Printf("Failed to subscribe to %s: %v\n", subject, err)
 				}
 			}
-
-			// Wait for all subscriptions to be ready
-			subWg.Wait()
 			log.Println("All NATS subscriptions established")
 		}()
 	})
@@ -397,6 +406,216 @@ func subscribeToGetBalance(wg *sync.WaitGroup) error {
 	// Keep subscription active - don't auto-unsubscribe
 	if err := sub.SetPendingLimits(-1, -1); err != nil {
 		log.Printf("Failed to set pending limits for wallet.balance: %v\n", err)
+	}
+
+	// Register this subscription for cleanup
+	RegisterSubscription(sub)
+
+	return nil
+}
+
+func subscribeToCheckBalance(wg *sync.WaitGroup) error {
+	defer wg.Done()
+	type Payload struct {
+		UserId int64 `json:"user_id"`
+		Amount int64 `json:"amount"`
+	}
+
+	// Subscribe to the "wallet.check_balance" subject
+	sub, err := nc.Subscribe("wallet.check_balance", func(msg *nats.Msg) {
+		startTime := time.Now()
+		log.Printf("Received message [%s] on subject %s\n", string(msg.Data), msg.Subject)
+
+		// Add recovery to prevent crashes
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Recovered from panic in wallet.check_balance handler: %v\n", r)
+				sendResponse(msg, ResponsePayload{
+					Success: false,
+					Error:   fmt.Sprintf("Internal server error: %v", r),
+				})
+			}
+		}()
+
+		// Parse the message payload
+		var p Payload
+		err := json.Unmarshal(msg.Data, &p)
+		if err != nil {
+			log.Printf("Unable to unmarshal payload: %v\n", err)
+			sendResponse(msg, ResponsePayload{
+				Success: false,
+				Error:   "Unable to unmarshal payload",
+			})
+			return
+		}
+
+		// Create a wallet with a retry mechanism
+		wallet := models.Wallet{UserID: p.UserId}
+		balance, err := wallet.GetBalance()
+		if err != nil {
+			log.Printf("Failed to get balance: %v\n", err)
+			sendResponse(msg, ResponsePayload{
+				Success: false,
+				Error:   fmt.Sprintf("Failed to get balance: %v", err),
+			})
+			return
+		}
+
+		// Check if the balance is enough for the withdrawal or transfer
+		if balance.Balance < p.Amount {
+			log.Printf("Insufficient balance")
+			sendResponse(msg, ResponsePayload{
+				Success: false,
+				Error:   fmt.Sprintf("Insufficient balance"),
+			})
+			return
+		}
+		log.Printf("Balance checked successfully in %v\n", time.Since(startTime))
+
+		// Send success response
+		sendResponse(msg, ResponsePayload{
+			Success: true,
+		})
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to wallet.check_balance: %w", err)
+
+	}
+
+	// Keep subscription active - don't auto-unsubscribe
+	if err := sub.SetPendingLimits(-1, -1); err != nil {
+		log.Printf("Failed to set pending limits for wallet.check_balance: %v\n", err)
+	}
+
+	// Register this subscription for cleanup
+	RegisterSubscription(sub)
+
+	return nil
+}
+
+func subscribeToDeposit(wg *sync.WaitGroup) error {
+	defer wg.Done()
+	// Subscribe to the "wallet.deposit" subject
+	sub, err := nc.Subscribe("wallet.deposit", func(msg *nats.Msg) {
+		startTime := time.Now()
+		log.Printf("Received message [%s] on subject %s\n", string(msg.Data), msg.Subject)
+
+		// Add recovery to prevent crashes
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Recovered from panic in wallet.deposit handler: %v\n", r)
+				sendResponse(msg, ResponsePayload{
+					Success: false,
+					Error:   fmt.Sprintf("Internal server error: %v", r),
+				})
+			}
+		}()
+
+		// Parse the message payload
+		var p models.Wallet
+		err := json.Unmarshal(msg.Data, &p)
+		if err != nil {
+			log.Printf("Unable to unmarshal payload: %v\n", err)
+			sendResponse(msg, ResponsePayload{
+				Success: false,
+				Error:   "Unable to unmarshal payload",
+			})
+			return
+		}
+
+		// Create a wallet with a retry mechanism
+		w := models.Wallet{UserID: p.UserID, ID: p.ID}
+		wallet, err := w.RechargeWallet(p.Balance)
+		if err != nil {
+			log.Printf("Failed to recharge wallet: %v\n", err)
+			sendResponse(msg, ResponsePayload{
+				Success: false,
+				Error:   fmt.Sprintf("Failed to recharge wallet: %v", err),
+			})
+			return
+		}
+
+		// Send success response
+		sendResponse(msg, ResponsePayload{
+			Success: true,
+			Data:    wallet,
+		})
+		log.Printf("Deposit processed successfully in %v\n", time.Since(startTime))
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to wallet.deposit: %w", err)
+	}
+
+	// Keep subscription active - don't auto-unsubscribe
+	if err := sub.SetPendingLimits(-1, -1); err != nil {
+		log.Printf("Failed to set pending limits for wallet.deposit: %v\n", err)
+	}
+
+	// Register this subscription for cleanup
+	RegisterSubscription(sub)
+
+	return nil
+}
+
+func subscribeToWithdraw(wg *sync.WaitGroup) error {
+	defer wg.Done()
+	// Subscribe to the "wallet.withdraw" subject
+	sub, err := nc.Subscribe("wallet.withdraw", func(msg *nats.Msg) {
+		startTime := time.Now()
+		log.Printf("Received message [%s] on subject %s\n", string(msg.Data), msg.Subject)
+
+		// Add recovery to prevent crashes
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Recovered from panic in wallet.withdraw handler: %v\n", r)
+				sendResponse(msg, ResponsePayload{
+					Success: false,
+					Error:   fmt.Sprintf("Internal server error: %v", r),
+				})
+			}
+		}()
+
+		// Parse the message payload
+		var p models.Wallet
+		err := json.Unmarshal(msg.Data, &p)
+		if err != nil {
+			log.Printf("Unable to unmarshal payload: %v\n", err)
+			sendResponse(msg, ResponsePayload{
+				Success: false,
+				Error:   "Unable to unmarshal payload",
+			})
+			return
+		}
+
+		// Withdraw the wallet
+		w := models.Wallet{UserID: p.UserID, ID: p.ID}
+		wallet, err := w.WithdrawWallet(p.Balance)
+		if err != nil {
+			log.Printf("Failed to withdraw wallet: %v\n", err)
+			sendResponse(msg, ResponsePayload{
+				Success: false,
+				Error:   fmt.Sprintf("Failed to withdraw wallet: %v", err),
+			})
+			return
+		}
+		log.Printf("Withdraw processed successfully in %v\n", time.Since(startTime))
+
+		// Send success response
+		sendResponse(msg, ResponsePayload{
+			Success: true,
+			Data:    wallet,
+		})
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to subscribe to wallet.deposit: %w", err)
+	}
+
+	// Keep subscription active - don't auto-unsubscribe
+	if err := sub.SetPendingLimits(-1, -1); err != nil {
+		log.Printf("Failed to set pending limits for wallet.deposit: %v\n", err)
 	}
 
 	// Register this subscription for cleanup
