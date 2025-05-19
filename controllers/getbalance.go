@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	status "github.com/emmadal/feeti-module/status"
 	"github.com/emmadal/feeti-wallet/helpers"
 	"github.com/emmadal/feeti-wallet/models"
 	"github.com/gin-gonic/gin"
@@ -15,20 +16,20 @@ func GetBalanceByUser(c *gin.Context) {
 	// get user_id from url
 	userID := c.Param("userID")
 	if userID == "" {
-		helpers.HandleError(c, http.StatusBadRequest, "userID is required", nil)
+		status.HandleError(c, http.StatusBadRequest, "userID is required", nil)
 		return
 	}
 
 	// check if user_id is a number
 	if !helpers.IsNumericRequestID(userID) {
-		helpers.HandleError(c, http.StatusBadRequest, "incorrect parameters", nil)
+		status.HandleError(c, http.StatusBadRequest, "incorrect parameters", nil)
 		return
 	}
 
 	// convert userID to int64
 	userIDInt64, err := strconv.ParseInt(userID, 10, 64)
 	if err != nil {
-		helpers.HandleError(c, http.StatusBadRequest, "invalid parameters", nil)
+		status.HandleError(c, http.StatusBadRequest, "invalid parameters", nil)
 		return
 	}
 
@@ -37,7 +38,7 @@ func GetBalanceByUser(c *gin.Context) {
 	// get wallet balance
 	wl, err := wallet.GetBalance()
 	if err != nil {
-		helpers.HandleError(c, http.StatusInternalServerError, "failed to get wallet", err)
+		status.HandleError(c, http.StatusInternalServerError, "failed to get wallet", err)
 		return
 	}
 	response := models.WalletResponse{
@@ -63,5 +64,5 @@ func GetBalanceByUser(c *gin.Context) {
 		}
 	}(c.Request.Context())
 
-	helpers.HandleSuccessData(c, "balance retrieved successfully", response)
+	status.HandleSuccessData(c, "balance retrieved successfully", response)
 }

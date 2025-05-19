@@ -39,6 +39,32 @@ type WalletResponse struct {
 	Balance  int64  `json:"balance"`
 }
 
+// Request is the struct for a request
+type Request struct {
+	Amount   int64 `json:"amount" binding:"required,numeric,gt=0,min=100,max=2000000"`
+	UserID   int64 `json:"user_id" binding:"required,gt=0,numeric"`
+	WalletID int64 `json:"wallet_id" binding:"required,gt=0,numeric"`
+}
+
+// LockRequest is the struct for a lock request
+type LockRequest struct {
+	UserID   int64 `json:"user_id" binding:"required,gt=0,numeric"`
+	WalletID int64 `json:"wallet_id" binding:"required,gt=0,numeric"`
+}
+
+// UnLockRequest is the struct for a unlock request
+type UnLockRequest struct {
+	UserID   int64 `json:"user_id" binding:"required,gt=0,numeric"`
+	WalletID int64 `json:"wallet_id" binding:"required,gt=0,numeric"`
+}
+
+// WithdrawRequest is the struct for a withdrawal request
+type WithdrawRequest struct {
+	Amount   int64 `json:"amount" binding:"required,numeric,gt=0,min=100,max=2000000"`
+	UserID   int64 `json:"user_id" binding:"required,gt=0,numeric"`
+	WalletID int64 `json:"wallet_id" binding:"required,gt=0,numeric"`
+}
+
 // CreateWallet creates a new wallet
 func (w *Wallet) CreateWallet() (*Wallet, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

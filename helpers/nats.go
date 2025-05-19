@@ -200,6 +200,12 @@ type ResponsePayload struct {
 	Error   string `json:"error,omitempty"`
 }
 
+// RequestPayload represents the standard request structure
+type RequestPayload struct {
+	Data    string `json:"data"`
+	Subject string `json:"subject"`
+}
+
 // subscribeToCreateWallet creates a wallet when a message is received
 func subscribeToCreateWallet(wg *sync.WaitGroup) error {
 	defer wg.Done()
@@ -425,4 +431,13 @@ func sendResponse(msg *nats.Msg, payload ResponsePayload) {
 	} else {
 		log.Printf("Response sent to %s: %t\n", msg.Reply, payload.Success)
 	}
+}
+
+// PublishEvent sends a request to the NATS server
+func (r *RequestPayload) PublishEvent() (*nats.Msg, error) {
+	msg, err := nc.Request(r.Subject, []byte(r.Data), time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("unable to publish message: %v", err)
+	}
+	return msg, nil
 }

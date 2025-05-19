@@ -2,45 +2,40 @@ package controllers
 
 import (
 	"context"
-	"github.com/emmadal/feeti-wallet/helpers"
+	status "github.com/emmadal/feeti-module/status"
 	"github.com/emmadal/feeti-wallet/models"
 	"github.com/gin-gonic/gin"
 	"log"
 	"net/http"
 )
 
-type LockRequest struct {
-	UserID   int64 `json:"user_id" binding:"required,gt=0,numeric"`
-	WalletID int64 `json:"wallet_id" binding:"required,gt=0,numeric"`
-}
-
 // LockWalletByUser locks a wallet by user
 func LockWalletByUser(c *gin.Context) {
-	var body LockRequest
+	var body models.LockRequest
 
 	// Parse request body
 	if err := c.ShouldBindJSON(&body); err != nil {
-		helpers.HandleError(c, http.StatusBadRequest, "invalid request", err)
+		status.HandleError(c, http.StatusBadRequest, "invalid request", err)
 		return
 	}
 	w := models.Wallet{ID: body.WalletID, UserID: body.UserID}
 
 	// Check if the wallet is locked
 	if w.WalletIsLocked() {
-		helpers.HandleError(c, http.StatusLocked, "account already locked", nil)
+		status.HandleError(c, http.StatusLocked, "account already locked", nil)
 		return
 	}
 
 	// Get balance
 	wallet, err := w.GetBalance()
 	if err != nil {
-		helpers.HandleError(c, http.StatusInternalServerError, "failed to get wallet balance", err)
+		status.HandleError(c, http.StatusInternalServerError, "failed to get wallet balance", err)
 		return
 	}
 
 	// Lock wallet
 	if err := w.LockWallet(); err != nil {
-		helpers.HandleError(c, http.StatusInternalServerError, "failed to lock wallet", err)
+		status.HandleError(c, http.StatusInternalServerError, "failed to lock wallet", err)
 		return
 	}
 
@@ -61,5 +56,5 @@ func LockWalletByUser(c *gin.Context) {
 		}
 	}(c.Request.Context()) // Pass the context to the goroutine
 
-	helpers.HandleSuccess(c, "wallet locked successfully")
+	status.HandleSuccess(c, "wallet locked successfully")
 }

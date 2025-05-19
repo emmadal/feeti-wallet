@@ -3,26 +3,20 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"github.com/emmadal/feeti-wallet/helpers"
+	status "github.com/emmadal/feeti-module/status"
 	"github.com/emmadal/feeti-wallet/models"
 
 	"github.com/gin-gonic/gin"
 	"net/http"
 )
 
-type Request struct {
-	Amount   int64 `json:"amount" binding:"required,numeric,gt=0,min=100,max=2000000"`
-	UserID   int64 `json:"user_id" binding:"required,gt=0,numeric"`
-	WalletID int64 `json:"wallet_id" binding:"required,gt=0,numeric"`
-}
-
 // TopupWallet processes a wallet topup request
 func TopupWallet(c *gin.Context) {
-	var body Request
+	var body models.Request
 
 	// parse request body
 	if err := c.ShouldBindJSON(&body); err != nil {
-		helpers.HandleError(c, http.StatusBadRequest, "invalid request", err)
+		status.HandleError(c, http.StatusBadRequest, "invalid request", err)
 		return
 	}
 
@@ -30,14 +24,14 @@ func TopupWallet(c *gin.Context) {
 	w := models.Wallet{UserID: body.UserID, ID: body.WalletID}
 	balance, err := w.GetBalance()
 	if err != nil {
-		helpers.HandleError(c, http.StatusInternalServerError, "failed to get wallet balance", err)
+		status.HandleError(c, http.StatusInternalServerError, "failed to get wallet balance", err)
 		return
 	}
 
 	// topup wallet
 	wallet, err := w.RechargeWallet(body.Amount)
 	if err != nil {
-		helpers.HandleError(c, http.StatusInternalServerError, "failed to topup wallet", err)
+		status.HandleError(c, http.StatusInternalServerError, "failed to topup wallet", err)
 		return
 	}
 
@@ -59,7 +53,7 @@ func TopupWallet(c *gin.Context) {
 	}(c.Request.Context())
 
 	// return success response
-	helpers.HandleSuccessData(c, "wallet topup successful", models.WalletResponse{
+	status.HandleSuccessData(c, "wallet topup successful", models.WalletResponse{
 		ID:       wallet.ID,
 		Currency: wallet.Currency,
 		Balance:  wallet.Balance,
