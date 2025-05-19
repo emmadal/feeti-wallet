@@ -432,7 +432,7 @@ func subscribeToCheckBalance(wg *sync.WaitGroup) error {
 				log.Printf("Recovered from panic in wallet.check_balance handler: %v\n", r)
 				sendResponse(msg, ResponsePayload{
 					Success: false,
-					Error:   fmt.Sprintf("Internal server error: %v", r),
+					Error:   "Internal server error",
 				})
 			}
 		}()
@@ -456,7 +456,7 @@ func subscribeToCheckBalance(wg *sync.WaitGroup) error {
 			log.Printf("Failed to get balance: %v\n", err)
 			sendResponse(msg, ResponsePayload{
 				Success: false,
-				Error:   fmt.Sprintf("Failed to get balance: %v", err),
+				Error:   "Failed to get balance",
 			})
 			return
 		}
@@ -466,7 +466,7 @@ func subscribeToCheckBalance(wg *sync.WaitGroup) error {
 			log.Printf("Insufficient balance")
 			sendResponse(msg, ResponsePayload{
 				Success: false,
-				Error:   fmt.Sprintf("Insufficient balance"),
+				Error:   "Insufficient balance",
 			})
 			return
 		}
