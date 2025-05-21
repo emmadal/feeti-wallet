@@ -23,12 +23,10 @@ jobs:
       - name: Generate image tag
         id: image_tag
         run: |
-          set -euo pipefail
           echo "tag=$(echo ${{ github.sha }} | head -c7)" >> $GITHUB_OUTPUT
 
       - name: Build Docker image locally
         run: |
-          set -euo pipefail
           # Build the docker image locally
           docker build -t localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }} .
           docker tag localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }} localhost:5000/feeti-wallet-service:latest
@@ -37,35 +35,20 @@ jobs:
           mkdir -p ./docker-images
           docker save localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }} | gzip > ./docker-images/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz
 
-      - name: Set up SSH with private key
-        run: |
-          set -euo pipefail
-          # Create SSH directory if it doesn't exist
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          
-          # Write the SSH private key to a file
-          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          
-          # Add the host to known_hosts
-          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
-          
-          # Verify the SSH key works
-          echo "Testing SSH connection..."
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=5 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} echo "SSH connection successful" || { echo "SSH connection failed"; exit 1; }
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
       - name: Transfer Docker image to VPS
         run: |
           # Transfer the image file to VPS
-          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ./docker-images/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/
+          scp -o StrictHostKeyChecking=no ./docker-images/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/
 
       - name: Load Docker image on VPS
         run: |
-          set -euo pipefail
           # Connect to VPS and load the image
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
-            set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
             # Load the Docker image
             docker load < /tmp/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz
           
@@ -82,10 +65,6 @@ jobs:
             # Tag latest as well
             docker tag localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }} localhost:5000/feeti-wallet-service:latest
             docker push localhost:5000/feeti-wallet-service:latest
-
-            # Prune old images (keep only last 5)
-            docker images "localhost:5000/feeti-wallet-service" --format "{{.Repository}}:{{.Tag}} {{.CreatedAt}}" | \
-              sort -rk2 | tail -n +6 | awk '{print $1}' | xargs -r docker rmi || true
           ENDSSH
 
   deploy:
@@ -101,7 +80,6 @@ jobs:
 
       - name: Generate Kubernetes manifests
         run: |
-          set -euo pipefail
           # Create manifests directory
           mkdir -p ./k8s-wallet
           
@@ -165,8 +143,6 @@ jobs:
                 port: 5432  # PostgreSQL
               - protocol: TCP
                 port: 4222  # NATS
-              - protocol: TCP
-                port: 4000  # HTTP
           EOF
           
           # Generate auth-service.yaml
@@ -217,8 +193,8 @@ jobs:
                         number: 4000
           EOF
           
-          # Generate health-check ingress
-          cat <<EOF > ./k8s-wallet/health-ingress.yaml
+          # Generate auth-ingress.yaml
+          cat <<EOF > ./k8s-wallet/auth-ingress.yaml
           apiVersion: networking.k8s.io/v1
           kind: Ingress
           metadata:
@@ -239,25 +215,6 @@ jobs:
                       name: wallet-service
                       port:
                         number: 4000
-          EOF
-          
-          # Generate certificate issuer for Let's Encrypt
-          cat <<EOF > ./k8s-wallet/cluster-issuer.yaml
-          apiVersion: cert-manager.io/v1
-          kind: ClusterIssuer
-          metadata:
-            name: letsencrypt-prod
-            namespace: cert-manager
-          spec:
-            acme:
-              server: https://acme-v02.api.letsencrypt.org/directory
-              email: metasploit.ruby@gmail.com
-              privateKeySecretRef:
-                name: letsencrypt-prod
-              solvers:
-              - http01:
-                  ingress:
-                    class: nginx
           EOF
           
           # Generate auth-deployment.yaml - using locally available image
@@ -283,13 +240,6 @@ jobs:
                 - name: wallet-service
                   image: ${IMAGE_PATH}
                   imagePullPolicy: Always
-                  command:
-                  - /bin/sh
-                  - -c
-                  - |
-                    echo "Verifying database connection parameters..."
-                    echo "Starting wallet service..."
-                    /app/feeti-wallet-service
                   ports:
                   - containerPort: 4000
                   resources:
@@ -305,28 +255,28 @@ jobs:
                   - name: NODE_ENV
                     valueFrom:
                       configMapKeyRef:
-                        name: wallet-config
+                        name: auth-config
                         key: NODE_ENV
                   - name: SERVICE_NAME
                     valueFrom:
                       configMapKeyRef:
-                        name: wallet-config
+                        name: auth-config
                         key: SERVICE_NAME
                   - name: JWT_KEY
                     valueFrom:
                       secretKeyRef:
                         name: auth-secrets
                         key: JWT_KEY
-                  - name: HOST_URL
-                    valueFrom:
-                      secretKeyRef:
-                        name: auth-secrets
-                        key: HOST_URL
                   - name: NATS_URL
                     valueFrom:
                       secretKeyRef:
                         name: auth-secrets
                         key: NATS_URL
+                  - name: HOST_URL
+                    valueFrom:
+                      secretKeyRef:
+                        name: auth-secrets
+                        key: HOST_URL
                   - name: GIN_MODE
                     valueFrom:
                       secretKeyRef:
@@ -361,35 +311,6 @@ jobs:
                     periodSeconds: 10
                     timeoutSeconds: 5
                     failureThreshold: 3
-          EOF
-          
-          # Generate auth-ingress.yaml
-          cat <<EOF > ./k8s-wallet/auth-ingress.yaml
-          apiVersion: networking.k8s.io/v1
-          kind: Ingress
-          metadata:
-            name: wallet-ingress
-            namespace: feeti-wallet
-            annotations:
-              nginx.ingress.kubernetes.io/ssl-redirect: "true"
-              cert-manager.io/cluster-issuer: letsencrypt-prod
-          spec:
-            ingressClassName: nginx
-            tls:
-            - hosts:
-              - ${{ secrets.HOST_URL }}
-              secretName: feeti-wallet-tls
-            rules:
-            - host: ${{ secrets.HOST_URL }}
-              http:
-                paths:
-                - path: /
-                  pathType: Prefix
-                  backend:
-                    service:
-                      name: wallet-service
-                      port:
-                        number: 4000
           EOF
           
           # Generate auth-hpa.yaml
@@ -452,35 +373,53 @@ jobs:
                         fi
                     restartPolicy: OnFailure
           EOF
+          
+          # Generate certificate issuer for Let's Encrypt
+          cat <<EOF > ./k8s-wallet/cluster-issuer.yaml
+          apiVersion: cert-manager.io/v1
+          kind: ClusterIssuer
+          metadata:
+            name: letsencrypt-prod
+            namespace: cert-manager
+          spec:
+            acme:
+              server: https://acme-v02.api.letsencrypt.org/directory
+              email: metasploit.ruby@gmail.com
+              privateKeySecretRef:
+                name: letsencrypt-prod
+              solvers:
+              - http01:
+                  ingress:
+                    class: nginx
+          EOF
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.5.4
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
       - name: Install cert-manager and NGINX Ingress Controller
         run: |
-          set -euo pipefail
-          # Use explicit SSH command with the private key file
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
-            set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
             # Install cert-manager if not already installed
             if ! kubectl get namespace cert-manager &>/dev/null; then
               echo "Installing cert-manager..."
               kubectl create namespace cert-manager
               kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.12.0/cert-manager.yaml
-              
+          
               # Wait for cert-manager to be ready
               echo "Waiting for cert-manager to be ready..."
               kubectl -n cert-manager wait --for=condition=available deployment --all --timeout=300s
             else
               echo "cert-manager already installed."
             fi
-            
+          
             # Install NGINX Ingress Controller if not already installed
             if ! kubectl get namespace ingress-nginx &>/dev/null; then
               echo "Installing NGINX Ingress Controller..."
               kubectl create namespace ingress-nginx
               kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.0/deploy/static/provider/cloud/deploy.yaml
-              
-              # Label the namespace for network policies
-              kubectl label namespace ingress-nginx name=ingress-nginx --overwrite
-              
+          
               # Wait for NGINX Ingress Controller to be ready
               echo "Waiting for NGINX Ingress Controller to be ready..."
               kubectl -n ingress-nginx wait --for=condition=available deployment --all --timeout=300s
@@ -489,53 +428,48 @@ jobs:
             fi
           ENDSSH
 
+      - name: Transfer Kubernetes manifests to server
+        run: |
+          # Create directory on remote server
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "mkdir -p /tmp/k8s-wallet"
+          
+          # Copy all manifests to the server
+          scp -o StrictHostKeyChecking=no ./k8s-wallet/* ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/k8s-wallet/
+          
+          # List the files to confirm transfer
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "ls -la /tmp/k8s-wallet/"
+
       - name: Clean up old resources
         run: |
-          set -euo pipefail
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
-            set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
             echo "Cleaning up old Ingress resources..."
-            
-            # Remove any ingress with outdated hostname
-            OLD_INGRESS=$(kubectl get ingress -n feeti-wallet -o json | jq -r '.items[] | select(.spec.rules[].host != "'${{ secrets.HOST_URL }}'") | .metadata.name')
+          
+            # Remove any ingress with 'wallet.feeti.app' hostname
+            OLD_INGRESS=$(kubectl get ingress -n feeti-wallet -o json | jq -r '.items[] | select(.spec.rules[].host == "wallet.feeti.app") | .metadata.name')
             if [ -n "$OLD_INGRESS" ]; then
               echo "Removing old ingress with incorrect hostname: $OLD_INGRESS"
               kubectl delete ingress -n feeti-wallet $OLD_INGRESS
             fi
-            
+          
             # Also handle any other duplicate or conflicting ingress
             # But keep our newly created ones
             kubectl get ingress -n feeti-wallet --no-headers | grep -v "wallet-service-ingress" | grep -v "wallet-healthz-ingress" | awk '{print $1}' | xargs -r kubectl delete ingress -n feeti-wallet
-            
+          
             echo "Current ingress resources after cleanup:"
             kubectl get ingress -n feeti-wallet
           ENDSSH
 
-      - name: Transfer Kubernetes manifests to server
-        run: |
-          set -euo pipefail
-          # Create directory on remote server
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "mkdir -p /tmp/k8s-wallet"
-          
-          # Copy all manifests to the server
-          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ./k8s-wallet/* ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/k8s-wallet/
-          
-          # List the files to confirm transfer
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "ls -la /tmp/k8s-wallet/"
-
       - name: Run kubectl apply with validation
         run: |
-          set -euo pipefail
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
-            set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
             cd /tmp/k8s-wallet
-            
+          
             # Create namespace if it doesn't exist
             kubectl apply -f namespace.yaml
             kubectl apply -f configmap.yaml
-            
+          
             # Create or update Kubernetes secrets first
-            kubectl create secret generic wallet-secrets \
+            kubectl create secret generic auth-secrets \
               --namespace=feeti-wallet \
               --from-literal=JWT_KEY='${{ secrets.JWT_KEY }}' \
               --from-literal=DATABASE_URL='${{ secrets.DATABASE_URL }}' \
@@ -544,31 +478,31 @@ jobs:
               --from-literal=GIN_MODE='release' \
               --from-literal=PORT=':4000' \
               --dry-run=client -o yaml | kubectl apply -f -
-            
+          
             # Apply remaining manifests in correct order
             kubectl apply -f network-policy.yaml
             kubectl apply -f auth-service.yaml
             kubectl apply -f cluster-issuer.yaml
-            
+          
             # Fix ingress class annotation issue if needed
             sed -i 's/kubernetes.io\/ingress.class: "nginx"//' ingress.yaml || true
-            
+          
             # Apply ingress first to let certificate provisioning begin
             kubectl apply -f ingress.yaml
-            kubectl apply -f health-ingress.yaml
-            
+            kubectl apply -f auth-ingress.yaml
+          
             # Apply deployment last to ensure all other resources are ready
             kubectl apply -f auth-deployment.yaml
             kubectl apply -f auth-hpa.yaml
-            
+          
             # Validate deployment status with increased timeout
             echo "Waiting for deployment to begin rolling out..."
             sleep 5
-            
+          
             # Check pod creation before waiting on rollout
             echo "Checking pod status before waiting on rollout..."
             kubectl -n feeti-wallet get pods -l app=wallet-service
-            
+          
             # Check the logs in case of pending pods
             PENDING_PODS=$(kubectl -n feeti-wallet get pods -l app=wallet-service -o jsonpath='{.items[?(@.status.phase=="Pending")].metadata.name}')
             if [ -n "$PENDING_PODS" ]; then
@@ -578,26 +512,26 @@ jobs:
                 kubectl -n feeti-wallet describe pod $pod
               done
             fi
-            
+          
             # Longer timeout for rollout status
             if ! kubectl -n feeti-wallet rollout status deployment/wallet-service --timeout=120s; then
               echo "Deployment failed to start rolling out. Getting more diagnostics before rollback..."
-              
+          
               # Get pod details
               echo "Pod details:"
               kubectl -n feeti-wallet get pods -l app=wallet-service -o wide
-              
+          
               # Get any events related to the pods
               echo "Pod events:"
               kubectl -n feeti-wallet get events --sort-by=.metadata.creationTimestamp | tail -20
-              
+          
               # Get logs from any containers that have started
               PODS=$(kubectl -n feeti-wallet get pods -l app=wallet-service -o jsonpath='{.items[*].metadata.name}')
               for pod in $PODS; do
                 echo "Logs from pod $pod (if available):"
                 kubectl -n feeti-wallet logs $pod --tail=50 || echo "No logs available for $pod"
               done
-              
+          
               # Now roll back
               echo "Rolling back deployment..."
               kubectl -n feeti-wallet rollout undo deployment/wallet-service
@@ -607,13 +541,11 @@ jobs:
 
       - name: Monitor deployment
         run: |
-          set -euo pipefail
-          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
-            set -euo pipefail
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
             # Wait for deployment to start
             echo "Waiting for pods to be created..."
             sleep 5
-            
+          
             # Monitor deployment rollout
             if ! kubectl -n feeti-wallet rollout status deployment/wallet-service --timeout=120s; then
               echo "Deployment failed to roll out within timeout. Check pod logs for errors."
@@ -624,33 +556,35 @@ jobs:
               done
               exit 1
             fi
-            
+          
             # Verify the ingress is correctly configured
             echo "Checking ingress status..."
             kubectl -n feeti-wallet get ingress
-            
+          
             # Check if certificate has been issued
             echo "Checking certificate status..."
             kubectl -n feeti-wallet get certificate
-            
+          
             # Test paths directly on the service to verify routes
             echo "Testing service endpoints directly (this should work)..."
             kubectl -n feeti-wallet run curl-test --image=curlimages/curl --rm -i --restart=Never -- \
               curl --max-time 5 http://wallet-service:4000/healthz || echo "Health endpoint may have different path"
-            
+          
             # Get information about available routes
             echo "Application routes analysis - tracing all endpoints:"
             kubectl -n feeti-wallet exec deployment/wallet-service -c wallet-service -- printenv || echo "Could not get environment"
-            
+            kubectl -n feeti-wallet run curl-test-path --image=curlimages/curl --rm -i --restart=Never -- \
+              curl --max-time 5 -v http://wallet-service:4000/ || echo "Root path test failed"
+          
             echo "Checking endpoints..."
             kubectl -n feeti-wallet get endpoints
-            
+          
             echo "Checking Ingress controller status..."
             kubectl -n ingress-nginx get pods
-            
+          
             echo "Checking Ingress configuration details:"
             kubectl -n feeti-wallet describe ingress
-            
+          
             echo "Deployment completed successfully. Your service should be available at:"
             echo "For API: https://${{ secrets.HOST_URL }}/api/v1/wallet"
             echo "For health endpoint: https://${{ secrets.HOST_URL }}/healthz"
@@ -661,6 +595,8 @@ jobs:
         run: |
           echo "Successfully deployed wallet-service with HTTPS enabled."
           echo "Service is now available at https://${{ secrets.HOST_URL }}/api/v1/wallet"
+          
+          # You can add other notification methods here (Slack, Discord, etc.)
 
   notify:
     name: Send Notification
