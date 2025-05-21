@@ -453,7 +453,10 @@ jobs:
               elif [ -d "/etc/iptables" ]; then
                 sudo sh -c "iptables-save > /etc/iptables/rules.v4"
               else
-                sudo apt-get update && sudo apt-get install -y iptables-persistent
+                # Use non-interactive installation to avoid prompts
+                echo iptables-persistent iptables-persistent/autosave_v4 boolean true | sudo debconf-set-selections
+                echo iptables-persistent iptables-persistent/autosave_v6 boolean true | sudo debconf-set-selections
+                sudo DEBIAN_FRONTEND=noninteractive apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
                 sudo netfilter-persistent save
               fi
               
@@ -484,7 +487,10 @@ jobs:
                 elif [ -d "/etc/iptables" ]; then
                   sudo sh -c "iptables-save > /etc/iptables/rules.v4"
                 else
-                  sudo apt-get update && sudo apt-get install -y iptables-persistent
+                  # Use non-interactive installation to avoid prompts
+                  echo iptables-persistent iptables-persistent/autosave_v4 boolean true | sudo debconf-set-selections
+                  echo iptables-persistent iptables-persistent/autosave_v6 boolean true | sudo debconf-set-selections
+                  sudo DEBIAN_FRONTEND=noninteractive apt-get update && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
                   sudo netfilter-persistent save
                 fi
                 
