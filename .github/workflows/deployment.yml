@@ -174,6 +174,7 @@ jobs:
               cert-manager.io/cluster-issuer: "letsencrypt-prod"
               nginx.ingress.kubernetes.io/ssl-redirect: "true"
               nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+              nginx.ingress.kubernetes.io/rewrite-target: /\$2
           spec:
             ingressClassName: nginx
             tls:
@@ -184,7 +185,7 @@ jobs:
             - host: ${{ secrets.HOST_URL }}
               http:
                 paths:
-                - path: /api/v1/wallet
+                - path: /api/v1/wallet(/|$)(.*)
                   pathType: Prefix
                   backend:
                     service:
@@ -444,6 +445,12 @@ jobs:
           ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
             echo "Cleaning up old Ingress resources..."
           
+            # Label the ingress-nginx namespace for network policies if needed
+            kubectl label namespace ingress-nginx name=ingress-nginx --overwrite || true
+            
+            # Create or fix issuer if needed
+            kubectl apply -f /tmp/k8s-wallet/cluster-issuer.yaml
+            
             # Remove any ingress with 'wallet.feeti.app' hostname
             OLD_INGRESS=$(kubectl get ingress -n feeti-wallet -o json | jq -r '.items[] | select(.spec.rules[].host == "wallet.feeti.app") | .metadata.name')
             if [ -n "$OLD_INGRESS" ]; then
@@ -581,10 +588,30 @@ jobs:
           
             echo "Checking Ingress controller status..."
             kubectl -n ingress-nginx get pods
+            
+            # Check if Ingress controller service is properly exposing ports
+            echo "Checking Ingress controller service configuration:"
+            kubectl get svc -n ingress-nginx
           
             echo "Checking Ingress configuration details:"
             kubectl -n feeti-wallet describe ingress
+            
+            # Check certificate status in more detail
+            echo "Checking detailed certificate status:"
+            kubectl -n feeti-wallet get certificate -o yaml
+            kubectl -n feeti-wallet get certificaterequest -o yaml
+            kubectl -n feeti-wallet get order.acme.cert-manager.io -o yaml
+            kubectl -n cert-manager get challenges.acme.cert-manager.io -o yaml
           
+            echo "Checking endpoints..."
+            kubectl -n feeti-wallet get endpoints
+          
+            echo "Checking Ingress controller status..."
+            kubectl -n ingress-nginx get pods
+            
+            echo "Checking Ingress configuration details:"
+            kubectl -n feeti-wallet describe ingress
+            
             echo "Deployment completed successfully. Your service should be available at:"
             echo "For API: https://${{ secrets.HOST_URL }}/api/v1/wallet"
             echo "For health endpoint: https://${{ secrets.HOST_URL }}/healthz"
