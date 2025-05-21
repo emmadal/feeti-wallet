@@ -8,6 +8,7 @@ Feeti Wallet is a simple wallet system written in Go. The system currently suppo
 - Withdrawing money from a wallet
 - Locking a wallet
 - Unlocking a wallet
+- Disabling a wallet
 
 ## Setup
 
@@ -18,11 +19,12 @@ Feeti Wallet is a simple wallet system written in Go. The system currently suppo
 
 ## API Endpoints
 
-- `GET /v1/api/balance/:userID`: Get the balance of a wallet
-- `POST /v1/api/deposit`: Deposit money to a wallet
-- `POST /v1/api/withdraw`: Withdraw money from a wallet
-- `POST /v1/api/lock`: Lock a wallet
-- `POST /v1/api/unlock`: Unlock a wallet
+- `GET /api/v1/wallet/balance/:userID`: Get the balance of a wallet
+- `POST /api/v1/wallet/deposit`: Deposit money to a wallet
+- `POST /api/v1/wallet/withdraw`: Withdraw money from a wallet
+- `POST /api/v1/wallet/lock`: Lock a wallet
+- `POST /api/v1/wallet/unlock`: Unlock a wallet
+- `POST /api/v1/wallet/disable`: Disable a wallet
 
 ## NATS
 
@@ -42,8 +44,8 @@ The system uses the following environment variables:
 - `GIN_MODE`: The mode of the server (release or debug)
 - `PORT`: The port of the server
 - `NATS_URL`: The URL of the NATS server
-- `NATS_CLUSTER_ID`: The cluster ID of the NATS server
-- `NATS_CLIENT_ID`: The client ID of the NATS server
+- `DATABASE_URL`: The URL of the database
+- `HOST_URL`: The URL of the server
 
 ## Running Tests
 
