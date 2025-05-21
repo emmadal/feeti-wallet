@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	jwt "github.com/emmadal/feeti-module/auth"
 	status "github.com/emmadal/feeti-module/status"
 	"github.com/emmadal/feeti-wallet/models"
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,13 @@ func WithdrawWallet(c *gin.Context) {
 	// parse request body
 	if err := c.ShouldBindJSON(&body); err != nil {
 		status.HandleError(c, http.StatusBadRequest, "invalid request", err)
+		return
+	}
+
+	// verify user identity with context data
+	id, _ := jwt.GetUserIDFromGin(c)
+	if body.UserID != id {
+		status.HandleError(c, http.StatusForbidden, "Unauthorized user", nil)
 		return
 	}
 

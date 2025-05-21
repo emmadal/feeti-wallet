@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	jwt "github.com/emmadal/feeti-module/auth"
 	status "github.com/emmadal/feeti-module/status"
 	"github.com/emmadal/feeti-wallet/helpers"
 	"github.com/emmadal/feeti-wallet/models"
@@ -30,6 +31,13 @@ func GetBalanceByUser(c *gin.Context) {
 	userIDInt64, err := strconv.ParseInt(userID, 10, 64)
 	if err != nil {
 		status.HandleError(c, http.StatusBadRequest, "invalid parameters", nil)
+		return
+	}
+
+	// verify user identity with context data
+	id, _ := jwt.GetUserIDFromGin(c)
+	if userIDInt64 != id {
+		status.HandleError(c, http.StatusForbidden, "Unauthorized user", nil)
 		return
 	}
 
