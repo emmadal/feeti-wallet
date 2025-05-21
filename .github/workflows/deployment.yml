@@ -255,37 +255,37 @@ jobs:
                   - name: NODE_ENV
                     valueFrom:
                       configMapKeyRef:
-                        name: auth-config
+                        name: wallet-config
                         key: NODE_ENV
                   - name: SERVICE_NAME
                     valueFrom:
                       configMapKeyRef:
-                        name: auth-config
+                        name: wallet-config
                         key: SERVICE_NAME
                   - name: JWT_KEY
                     valueFrom:
                       secretKeyRef:
-                        name: auth-secrets
+                        name: wallet-secrets
                         key: JWT_KEY
                   - name: NATS_URL
                     valueFrom:
                       secretKeyRef:
-                        name: auth-secrets
+                        name: wallet-secrets
                         key: NATS_URL
                   - name: HOST_URL
                     valueFrom:
                       secretKeyRef:
-                        name: auth-secrets
+                        name: wallet-secrets
                         key: HOST_URL
                   - name: GIN_MODE
                     valueFrom:
                       secretKeyRef:
-                        name: auth-secrets
+                        name: wallet-secrets
                         key: GIN_MODE
                   - name: DATABASE_URL
                     valueFrom:
                       secretKeyRef:
-                        name: auth-secrets
+                        name: wallet-secrets
                         key: DATABASE_URL
                   startupProbe:
                     httpGet:
@@ -469,7 +469,7 @@ jobs:
             kubectl apply -f configmap.yaml
           
             # Create or update Kubernetes secrets first
-            kubectl create secret generic auth-secrets \
+            kubectl create secret generic wallet-secrets \
               --namespace=feeti-wallet \
               --from-literal=JWT_KEY='${{ secrets.JWT_KEY }}' \
               --from-literal=DATABASE_URL='${{ secrets.DATABASE_URL }}' \
