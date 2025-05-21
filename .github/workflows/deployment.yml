@@ -37,21 +37,34 @@ jobs:
           mkdir -p ./docker-images
           docker save localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }} | gzip > ./docker-images/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz
 
-      - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.5.4
-        with:
-          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+      - name: Set up SSH with private key
+        run: |
+          set -euo pipefail
+          # Create SSH directory if it doesn't exist
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          # Write the SSH private key to a file
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          # Add the host to known_hosts
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+          
+          # Verify the SSH key works
+          echo "Testing SSH connection..."
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o BatchMode=yes -o ConnectTimeout=5 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} echo "SSH connection successful" || { echo "SSH connection failed"; exit 1; }
 
       - name: Transfer Docker image to VPS
         run: |
           # Transfer the image file to VPS
-          scp -o StrictHostKeyChecking=no ./docker-images/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ./docker-images/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/
 
       - name: Load Docker image on VPS
         run: |
           set -euo pipefail
           # Connect to VPS and load the image
-          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
             set -euo pipefail
             # Load the Docker image
             docker load < /tmp/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz
@@ -443,7 +456,8 @@ jobs:
       - name: Install cert-manager and NGINX Ingress Controller
         run: |
           set -euo pipefail
-          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+          # Use explicit SSH command with the private key file
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
             set -euo pipefail
             # Install cert-manager if not already installed
             if ! kubectl get namespace cert-manager &>/dev/null; then
@@ -478,7 +492,7 @@ jobs:
       - name: Clean up old resources
         run: |
           set -euo pipefail
-          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
             set -euo pipefail
             echo "Cleaning up old Ingress resources..."
             
@@ -497,10 +511,22 @@ jobs:
             kubectl get ingress -n feeti-wallet
           ENDSSH
 
+      - name: Transfer Kubernetes manifests to server
+        run: |
+          set -euo pipefail
+          # Create directory on remote server
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "mkdir -p /tmp/k8s-wallet"
+          
+          # Copy all manifests to the server
+          scp -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no ./k8s-wallet/* ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/k8s-wallet/
+          
+          # List the files to confirm transfer
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "ls -la /tmp/k8s-wallet/"
+
       - name: Run kubectl apply with validation
         run: |
           set -euo pipefail
-          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
             set -euo pipefail
             cd /tmp/k8s-wallet
             
@@ -582,7 +608,7 @@ jobs:
       - name: Monitor deployment
         run: |
           set -euo pipefail
-          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+          ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
             set -euo pipefail
             # Wait for deployment to start
             echo "Waiting for pods to be created..."
