@@ -62,7 +62,7 @@ func main() {
 	server.Use(middleware.Recover())
 
 	// Set api version group
-	v1 := server.Group("/api/wallet/v1")
+	v1 := server.Group("/api/v1/wallet")
 
 	// initialize server
 	s := &http.Server{
