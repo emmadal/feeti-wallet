@@ -10,8 +10,9 @@ import (
 func HealthCheck(c *gin.Context) {
 	status.HandleSuccessData(
 		c, "OK", gin.H{
-			"status": "up",
-			"time":   time.Now().Format(time.RFC3339),
+			"status":  "up",
+			"time":    time.Now().Format(time.RFC3339),
+			"service": "Wallet Service",
 		},
 	)
 }
