@@ -419,13 +419,79 @@ jobs:
             if ! kubectl get namespace ingress-nginx &>/dev/null; then
               echo "Installing NGINX Ingress Controller..."
               kubectl create namespace ingress-nginx
-              kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.0/deploy/static/provider/cloud/deploy.yaml
+              
+              # Download the NGINX Ingress Controller manifest
+              curl -o nginx-ingress.yaml https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.0/deploy/static/provider/cloud/deploy.yaml
+              
+              # Modify the NGINX Ingress Controller service to use NodePort instead of LoadBalancer
+              # This is critical for VPS environments without native LoadBalancer support
+              sed -i 's/type: LoadBalancer/type: NodePort/' nginx-ingress.yaml
+              
+              # Apply the modified NGINX Ingress Controller manifest
+              kubectl apply -f nginx-ingress.yaml
           
               # Wait for NGINX Ingress Controller to be ready
               echo "Waiting for NGINX Ingress Controller to be ready..."
               kubectl -n ingress-nginx wait --for=condition=available deployment --all --timeout=300s
+              
+              # Get the assigned NodePort for HTTP and HTTPS
+              HTTP_PORT=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')
+              HTTPS_PORT=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}')
+              
+              echo "NGINX Ingress NodePort HTTP: $HTTP_PORT"
+              echo "NGINX Ingress NodePort HTTPS: $HTTPS_PORT"
+              
+              # Configure firewall rules to forward traffic from ports 80 & 443 to the NodePorts
+              # These commands will ensure that external traffic on standard web ports reaches the ingress controller
+              echo "Configuring firewall rules to forward ports 80->$HTTP_PORT and 443->$HTTPS_PORT"
+              sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port $HTTP_PORT
+              sudo iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port $HTTPS_PORT
+              
+              # Make iptables rules persistent
+              if command -v netfilter-persistent &> /dev/null; then
+                sudo netfilter-persistent save
+              elif [ -d "/etc/iptables" ]; then
+                sudo sh -c "iptables-save > /etc/iptables/rules.v4"
+              else
+                sudo apt-get update && sudo apt-get install -y iptables-persistent
+                sudo netfilter-persistent save
+              fi
+              
+              echo "Port forwarding configured from standard web ports to NodePorts"
             else
               echo "NGINX Ingress Controller already installed."
+              
+              # Ensure it's configured as NodePort
+              if kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.type}' | grep -q "LoadBalancer"; then
+                echo "Converting existing ingress-nginx-controller from LoadBalancer to NodePort..."
+                kubectl patch svc ingress-nginx-controller -n ingress-nginx -p '{"spec": {"type": "NodePort"}}'
+                
+                # Get the assigned NodePort for HTTP and HTTPS
+                HTTP_PORT=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')
+                HTTPS_PORT=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}')
+                
+                echo "NGINX Ingress NodePort HTTP: $HTTP_PORT"
+                echo "NGINX Ingress NodePort HTTPS: $HTTPS_PORT"
+                
+                # Configure firewall rules to forward traffic from ports 80 & 443 to the NodePorts
+                echo "Configuring firewall rules to forward ports 80->$HTTP_PORT and 443->$HTTPS_PORT"
+                sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port $HTTP_PORT
+                sudo iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port $HTTPS_PORT
+                
+                # Make iptables rules persistent
+                if command -v netfilter-persistent &> /dev/null; then
+                  sudo netfilter-persistent save
+                elif [ -d "/etc/iptables" ]; then
+                  sudo sh -c "iptables-save > /etc/iptables/rules.v4"
+                else
+                  sudo apt-get update && sudo apt-get install -y iptables-persistent
+                  sudo netfilter-persistent save
+                fi
+                
+                echo "Port forwarding configured from standard web ports to NodePorts"
+              else
+                echo "NGINX Ingress Controller already configured as NodePort"
+              fi
             fi
           ENDSSH
 
@@ -583,38 +649,62 @@ jobs:
             kubectl -n feeti-wallet run curl-test-path --image=curlimages/curl --rm -i --restart=Never -- \
               curl --max-time 5 -v http://wallet-service:4000/ || echo "Root path test failed"
           
-            echo "Checking endpoints..."
-            kubectl -n feeti-wallet get endpoints
-          
-            echo "Checking Ingress controller status..."
-            kubectl -n ingress-nginx get pods
-            
-            # Check if Ingress controller service is properly exposing ports
-            echo "Checking Ingress controller service configuration:"
+            echo "Checking NGINX Ingress Controller service configuration:"
             kubectl get svc -n ingress-nginx
-          
-            echo "Checking Ingress configuration details:"
-            kubectl -n feeti-wallet describe ingress
             
+            # Verify HTTPS setup
+            echo "Verifying NodePort configuration and firewall rules:"
+            HTTP_PORT=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')
+            HTTPS_PORT=$(kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.ports[?(@.name=="https")].nodePort}')
+            echo "HTTP NodePort: $HTTP_PORT"
+            echo "HTTPS NodePort: $HTTPS_PORT"
+            
+            # Check if port forwarding rules are in place
+            echo "Checking iptables forwarding rules:"
+            sudo iptables -t nat -L PREROUTING | grep -E "REDIRECT.*(80|443)"
+          
             # Check certificate status in more detail
             echo "Checking detailed certificate status:"
             kubectl -n feeti-wallet get certificate -o yaml
             kubectl -n feeti-wallet get certificaterequest -o yaml
             kubectl -n feeti-wallet get order.acme.cert-manager.io -o yaml
             kubectl -n cert-manager get challenges.acme.cert-manager.io -o yaml
-          
-            echo "Checking endpoints..."
-            kubectl -n feeti-wallet get endpoints
-          
-            echo "Checking Ingress controller status..."
-            kubectl -n ingress-nginx get pods
             
-            echo "Checking Ingress configuration details:"
-            kubectl -n feeti-wallet describe ingress
-            
+            # Wait for certificate to be issued
+            echo "Waiting for Let's Encrypt certificate issuance (up to 2 minutes)..."
+            START_TIME=$(date +%s)
+            TIMEOUT=120
+            while true; do
+              READY=$(kubectl -n feeti-wallet get certificate -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}')
+              
+              # Check if certificate is ready
+              if [ "$READY" == "True" ]; then
+                echo "Certificate successfully issued!"
+                break
+              fi
+              
+              # Check if timeout has been reached
+              CURRENT_TIME=$(date +%s)
+              ELAPSED=$((CURRENT_TIME - START_TIME))
+              if [ $ELAPSED -gt $TIMEOUT ]; then
+                echo "Timed out waiting for certificate issuance. You may need to check domain DNS settings."
+                echo "Current certificate status:"
+                kubectl -n feeti-wallet get certificate
+                break
+              fi
+              
+              echo "Certificate not ready yet. Waiting..."
+              sleep 10
+            done
+          
             echo "Deployment completed successfully. Your service should be available at:"
             echo "For API: https://${{ secrets.HOST_URL }}/api/v1/wallet"
             echo "For health endpoint: https://${{ secrets.HOST_URL }}/healthz"
+            
+            echo "If you're still having issues accessing the service, please verify:"
+            echo "1. Your DNS settings for ${{ secrets.HOST_URL }} point to this server's IP address"
+            echo "2. Ports 80 and 443 are open in any external firewalls"
+            echo "3. The domain is properly configured and DNS has propagated"
           ENDSSH
 
       - name: Send success notification
