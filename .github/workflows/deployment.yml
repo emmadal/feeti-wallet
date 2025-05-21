@@ -180,7 +180,7 @@ jobs:
             - host: ${{ secrets.HOST_URL }}
               http:
                 paths:
-                - path: /api/v1/wallet(/|$)(.*)
+                - path: /api/v1(/|$)(.*)
                   pathType: Prefix
                   backend:
                     service:
@@ -283,7 +283,7 @@ jobs:
                         key: DATABASE_URL
                   startupProbe:
                     httpGet:
-                      path: /api/v1/wallet/healthz
+                      path: /api/v1/healthz
                       port: 4000
                     initialDelaySeconds: 10
                     periodSeconds: 5
@@ -291,7 +291,7 @@ jobs:
                     failureThreshold: 30
                   livenessProbe:
                     httpGet:
-                      path: /api/v1/wallet/healthz
+                      path: /api/v1/healthz
                       port: 4000
                     initialDelaySeconds: 60
                     periodSeconds: 20
@@ -299,7 +299,7 @@ jobs:
                     failureThreshold: 5
                   readinessProbe:
                     httpGet:
-                      path: /api/v1/wallet/healthz
+                      path: /api/v1/healthz
                       port: 4000
                     initialDelaySeconds: 30
                     periodSeconds: 10
@@ -358,7 +358,7 @@ jobs:
                       - /bin/sh
                       - -c
                       - |
-                        if curl -s -o /dev/null -w "%{http_code}" http://wallet-service:4000/api/v1/wallet/healthz | grep -q 200; then
+                        if curl -s -o /dev/null -w "%{http_code}" http://wallet-service:4000/api/v1/healthz | grep -q 200; then
                           echo "Health check passed"
                           exit 0
                         else
@@ -564,12 +564,12 @@ jobs:
             SERVER_IP=$(curl -s ifconfig.me)
             
             echo "Deployment completed successfully. Your service should be available at:"
-            echo "For API: http://${{ secrets.HOST_URL }}:30100/api/v1/wallet"
+            echo "For API: http://${{ secrets.HOST_URL }}:30100/api/v1"
             echo "For health endpoint: http://${{ secrets.HOST_URL }}:30100/healthz"
             
             echo "If you're still having issues accessing the service, please verify:"
             echo "1. Port 30100 is open in any external firewalls"
-            echo "2. Your application is correctly responding on the /api/v1/wallet path"
+            echo "2. Your application is correctly responding on the /api/v1 path"
           ENDSSH
 
   notify:
