@@ -36,14 +36,17 @@ jobs:
           docker save localhost:5000/feeti-wallet-service:${{ steps.image_tag.outputs.tag }} | gzip > ./docker-images/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz
 
       - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.5.4
+        uses: webfactory/ssh-agent@v0.8.0
         with:
           ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
 
+      - name: Test SSH connection
+        run: |
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "echo SSH connection successful"
+
       - name: Transfer Docker image to VPS
         run: |
-          # Transfer the image file to VPS
-          scp -o StrictHostKeyChecking=no ./docker-images/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/
+          scp -o StrictHostKeyChecking=no -P 22 -C ./docker-images/feeti-wallet-service-${{ steps.image_tag.outputs.tag }}.tar.gz ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/
 
       - name: Load Docker image on VPS
         run: |
@@ -77,6 +80,95 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      - name: Set up SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+          
+      - name: Test SSH connection
+        run: |
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "echo SSH connection successful"
+
+      - name: Install NGINX Ingress Controller
+        run: |
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+            # Install NGINX Ingress Controller if not already installed
+            if ! kubectl get namespace ingress-nginx &>/dev/null; then
+              echo "Installing NGINX Ingress Controller..."
+              kubectl create namespace ingress-nginx
+              
+              # Download the NGINX Ingress Controller manifest
+              curl -o nginx-ingress.yaml https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.0/deploy/static/provider/cloud/deploy.yaml
+              
+              # Modify the NGINX Ingress Controller service to use NodePort instead of LoadBalancer
+              sed -i 's/type: LoadBalancer/type: NodePort/' nginx-ingress.yaml
+              
+              # Apply the modified NGINX Ingress Controller manifest
+              kubectl apply -f nginx-ingress.yaml
+          
+              # Wait for NGINX Ingress Controller to be ready
+              echo "Waiting for NGINX Ingress Controller to be ready..."
+              kubectl -n ingress-nginx wait --for=condition=available deployment --all --timeout=300s
+            else
+              echo "NGINX Ingress Controller already installed."
+              
+              # Ensure it's configured as NodePort
+              if kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.type}' | grep -q "LoadBalancer"; then
+                echo "Converting existing ingress-nginx-controller from LoadBalancer to NodePort..."
+                kubectl patch svc ingress-nginx-controller -n ingress-nginx -p '{"spec": {"type": "NodePort"}}'
+              else
+                echo "NGINX Ingress Controller already configured as NodePort"
+              fi
+            fi
+            
+            # Label the ingress-nginx namespace for network policies
+            kubectl label namespace ingress-nginx name=ingress-nginx --overwrite || true
+          ENDSSH
+
+      - name: Prepare TLS secrets
+        run: |
+          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
+            # Create TLS secret for HTTPS
+            echo "Creating TLS secret from Let's Encrypt certificates..."
+            
+            # Path to Let's Encrypt certificates
+            CERT_PATH="/etc/letsencrypt/live/${{ secrets.HOST_URL }}"
+            
+            # Check if certificates exist
+            if [ -d "$CERT_PATH" ]; then
+              # Check if we have read permissions, if not use sudo to copy to a temporary location
+              if [ ! -r "$CERT_PATH/fullchain.pem" ] || [ ! -r "$CERT_PATH/privkey.pem" ]; then
+                echo "Copying certificates to temporary location with sudo..."
+                sudo cp "$CERT_PATH/fullchain.pem" /tmp/fullchain.pem
+                sudo cp "$CERT_PATH/privkey.pem" /tmp/privkey.pem
+                sudo chmod 644 /tmp/fullchain.pem /tmp/privkey.pem
+                
+                # Create TLS secret using temporary files
+                kubectl create secret tls feeti-tls \
+                  --cert=/tmp/fullchain.pem \
+                  --key=/tmp/privkey.pem \
+                  --namespace=feeti-wallet \
+                  --dry-run=client -o yaml | kubectl apply -f -
+                
+                # Clean up temporary files
+                rm -f /tmp/fullchain.pem /tmp/privkey.pem
+              else
+                # Create TLS secret directly
+                kubectl create secret tls feeti-tls \
+                  --cert="$CERT_PATH/fullchain.pem" \
+                  --key="$CERT_PATH/privkey.pem" \
+                  --namespace=feeti-wallet \
+                  --dry-run=client -o yaml | kubectl apply -f -
+              fi
+              
+              echo "TLS secret 'feeti-tls' created successfully in wallet namespace."
+            else
+              echo "ERROR: Let's Encrypt certificates not found at $CERT_PATH"
+              echo "Please ensure that Let's Encrypt certificates are properly installed."
+              exit 1
+            fi
+          ENDSSH
 
       - name: Generate Kubernetes manifests
         run: |
@@ -164,7 +256,7 @@ jobs:
             type: NodePort
           EOF
           
-          # Generate simple ingress.yaml without TLS
+          # Generate ingress.yaml for API routing with SSL
           cat <<EOF > ./k8s-wallet/ingress.yaml
           apiVersion: networking.k8s.io/v1
           kind: Ingress
@@ -172,15 +264,20 @@ jobs:
             name: wallet-service-ingress
             namespace: feeti-wallet
             annotations:
+              nginx.ingress.kubernetes.io/ssl-redirect: "true"
+              nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
               nginx.ingress.kubernetes.io/proxy-body-size: "10m"
-              nginx.ingress.kubernetes.io/rewrite-target: /\$2
           spec:
             ingressClassName: nginx
+            tls:
+            - hosts:
+              - vmi2625233.contaboserver.net
+              secretName: feeti-tls
             rules:
-            - host: ${{ secrets.HOST_URL }}
+            - host: vmi2625233.contaboserver.net
               http:
                 paths:
-                - path: /api/v1(/|$)(.*)
+                - path: /api/v1/wallet
                   pathType: Prefix
                   backend:
                     service:
@@ -189,20 +286,27 @@ jobs:
                         number: 3000
           EOF
           
-          # Generate auth-ingress.yaml
-          cat <<EOF > ./k8s-wallet/auth-ingress.yaml
+          # Generate wallet-ingress.yaml for health checks with SSL
+          cat <<EOF > ./k8s-wallet/wallet-ingress.yaml
           apiVersion: networking.k8s.io/v1
           kind: Ingress
           metadata:
             name: wallet-healthz-ingress
             namespace: feeti-wallet
+            annotations:
+              nginx.ingress.kubernetes.io/ssl-redirect: "true"
+              nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
           spec:
             ingressClassName: nginx
+            tls:
+            - hosts:
+              - vmi2625233.contaboserver.net
+              secretName: feeti-tls
             rules:
-            - host: ${{ secrets.HOST_URL }}
+            - host: vmi2625233.contaboserver.net
               http:
                 paths:
-                - path: /healthz
+                - path: /wallet/healthz
                   pathType: Exact
                   backend:
                     service:
@@ -368,57 +472,13 @@ jobs:
                     restartPolicy: OnFailure
           EOF
 
-      - name: Set up SSH
-        uses: webfactory/ssh-agent@v0.5.4
-        with:
-          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
-
-      - name: Install NGINX Ingress Controller
-        run: |
-          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
-            # Install NGINX Ingress Controller if not already installed
-            if ! kubectl get namespace ingress-nginx &>/dev/null; then
-              echo "Installing NGINX Ingress Controller..."
-              kubectl create namespace ingress-nginx
-              
-              # Download the NGINX Ingress Controller manifest
-              curl -o nginx-ingress.yaml https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.8.0/deploy/static/provider/cloud/deploy.yaml
-              
-              # Modify the NGINX Ingress Controller service to use NodePort instead of LoadBalancer
-              sed -i 's/type: LoadBalancer/type: NodePort/' nginx-ingress.yaml
-              
-              # Apply the modified NGINX Ingress Controller manifest
-              kubectl apply -f nginx-ingress.yaml
-          
-              # Wait for NGINX Ingress Controller to be ready
-              echo "Waiting for NGINX Ingress Controller to be ready..."
-              kubectl -n ingress-nginx wait --for=condition=available deployment --all --timeout=300s
-            else
-              echo "NGINX Ingress Controller already installed."
-              
-              # Ensure it's configured as NodePort
-              if kubectl get svc -n ingress-nginx ingress-nginx-controller -o jsonpath='{.spec.type}' | grep -q "LoadBalancer"; then
-                echo "Converting existing ingress-nginx-controller from LoadBalancer to NodePort..."
-                kubectl patch svc ingress-nginx-controller -n ingress-nginx -p '{"spec": {"type": "NodePort"}}'
-              else
-                echo "NGINX Ingress Controller already configured as NodePort"
-              fi
-            fi
-            
-            # Label the ingress-nginx namespace for network policies
-            kubectl label namespace ingress-nginx name=ingress-nginx --overwrite || true
-          ENDSSH
-
       - name: Transfer Kubernetes manifests to server
         run: |
           # Create directory on remote server
           ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "mkdir -p /tmp/k8s-wallet"
           
-          # Copy all manifests to the server
-          scp -o StrictHostKeyChecking=no ./k8s-wallet/* ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/k8s-wallet/
-          
-          # List the files to confirm transfer
-          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} "ls -la /tmp/k8s-wallet/"
+          # Transfer all generated files
+          scp -o StrictHostKeyChecking=no -P 22 -C ./k8s-wallet/* ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/k8s-wallet/
 
       - name: Clean up old resources
         run: |
@@ -469,7 +529,7 @@ jobs:
           
             # Apply ingress
             kubectl apply -f ingress.yaml
-            kubectl apply -f auth-ingress.yaml
+            kubectl apply -f wallet-ingress.yaml
           
             # Apply deployment last to ensure all other resources are ready
             kubectl apply -f auth-deployment.yaml
@@ -525,7 +585,7 @@ jobs:
             # Wait for deployment to start
             echo "Waiting for pods to be created..."
             sleep 5
-          
+            
             # Monitor deployment rollout
             if ! kubectl -n feeti-wallet rollout status deployment/wallet-service --timeout=120s; then
               echo "Deployment failed to roll out within timeout. Check pod logs for errors."
@@ -536,41 +596,42 @@ jobs:
               done
               exit 1
             fi
-          
-            # Verify the ingress is correctly configured
-            echo "Checking ingress status..."
-            kubectl -n feeti-wallet get ingress
-          
+            
+            # Verify the service is correctly configured
+            echo "Checking service status..."
+            kubectl -n feeti-wallet get service wallet-service
+            
             # Test paths directly on the service to verify routes
             echo "Testing service endpoints directly (this should work)..."
             kubectl -n feeti-wallet run curl-test --image=curlimages/curl --rm -i --restart=Never -- \
-              curl --max-time 5 http://wallet-service:3000/healthz || echo "Health endpoint may have different path"
-          
-            # Get information about available routes
-            echo "Application routes analysis - tracing all endpoints:"
-            kubectl -n feeti-wallet exec deployment/wallet-service -c wallet-service -- printenv || echo "Could not get environment"
-            kubectl -n feeti-wallet run curl-test-path --image=curlimages/curl --rm -i --restart=Never -- \
-              curl --max-time 5 -v http://wallet-service:3000/ || echo "Root path test failed"
-          
-            echo "Checking NGINX Ingress Controller service configuration:"
-            kubectl get svc -n ingress-nginx
+              curl --max-time 3 http://wallet-service:3000/api/v1/wallet/healthz || echo "Health endpoint may have different path"
             
-            # Verify NodePort is 30100
-            echo "Verifying wallet-service NodePort configuration:"
-            kubectl get svc -n feeti-wallet wallet-service -o jsonpath='{.spec.ports[0].nodePort}'
-            echo
+            echo "Checking endpoints..."
+            kubectl -n feeti-wallet get endpoints
             
-            # Get the server's external IP
-            SERVER_IP=$(curl -s ifconfig.me)
+            echo "Checking Ingress controller status..."
+            kubectl -n ingress-nginx get pods
+            
+            echo "Checking Ingress configuration details:"
+            kubectl -n feeti-wallet describe ingress
+            
+            echo "Testing SSL certificate configuration..."
+            # Check if curl with https works (verifying SSL setup)
+            kubectl -n feeti-wallet run curl-test-ssl --image=curlimages/curl --rm -i --restart=Never -- \
+              curl --max-time 10 -v -k https://${{ secrets.HOST_URL }}/api/v1/wallet/healthz || echo "HTTPS test failed"
             
             echo "Deployment completed successfully. Your service should be available at:"
-            echo "For API: http://${{ secrets.HOST_URL }}:30100/api/v1"
-            echo "For health endpoint: http://${{ secrets.HOST_URL }}:30100/healthz"
-            
-            echo "If you're still having issues accessing the service, please verify:"
-            echo "1. Port 30100 is open in any external firewalls"
-            echo "2. Your application is correctly responding on the /api/v1 path"
+            echo "For API: https://${{ secrets.HOST_URL }}/api/v1/wallet"
+            echo "For health endpoint: https://${{ secrets.HOST_URL }}/wallet/healthz"
           ENDSSH
+
+      - name: Send success notification
+        if: success()
+        run: |
+          echo "Successfully deployed wallet-service with HTTPS."
+          echo "Service is now available at https://${{ secrets.HOST_URL }}/api/v1/wallet"
+          
+          # You can add other notification methods here (Slack, Discord, etc.)
 
   notify:
     name: Send Notification
