@@ -38,7 +38,7 @@ func main() {
 
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = ":4000"
+		port = ":3000"
 	}
 
 	// Initialize Gin server
