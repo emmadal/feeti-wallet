@@ -1,0 +1,57 @@
+# Exclude the Go workspace directories
+/bin
+/pkg
+/build
+/cache
+/vendor
+benchmark/
+/api_request
+/api
+
+# Ignore the compiled binary (if present in local)
+backenduser
+wallet-service
+feeti-wallet-service
+
+# Ignore common Go environment files
+*.exe
+*.out
+*.test
+*.yml
+
+# Node.js related (if there's a frontend, or node_modules in the project)
+node_modules
+npm-debug.log
+
+# Git related
+.git
+.gitignore
+.github
+
+# Documentation
+*.md
+README.md
+docs/
+
+# Local development files
+.env
+.env.*
+*.log
+*.log.*
+*.tmp
+
+# Test and coverage files
+coverage/
+*.coverage
+*.coverprofile
+
+# Editor specific files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
