@@ -105,9 +105,6 @@ func main() {
 	// Wait for the interrupt signal to gracefully shut down the server with
 	// a timeout of 5 seconds.
 	quit := make(chan os.Signal, 1)
-	// kill (no params) by default sends syscall.SIGTERM
-	// kill -2 is syscall.SIGINT
-	// kill -9 is syscall.SIGKILL but can't be caught, so don't need to add it
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("Shutdown Server ...")
@@ -125,7 +122,6 @@ func main() {
 	if err := s.Shutdown(ctx); err != nil {
 		log.Println("Server Shutdown:", err)
 	}
-	// catching ctx.Done(). timeout of 5 seconds.
 	models.DB.Close()
 	<-ctx.Done()
 	log.Println("Server exiting")
