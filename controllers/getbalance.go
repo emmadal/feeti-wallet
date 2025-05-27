@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	jwt "github.com/emmadal/feeti-module/auth"
 	status "github.com/emmadal/feeti-module/status"
 	"github.com/emmadal/feeti-wallet/helpers"
@@ -56,7 +55,7 @@ func GetBalanceByUser(c *gin.Context) {
 	}
 
 	// record wallet log
-	go func(c context.Context) {
+	go func() {
 		walletLog := models.WalletLog{
 			UserID:         userIDInt64,
 			WalletID:       wl.ID,
@@ -70,7 +69,7 @@ func GetBalanceByUser(c *gin.Context) {
 		if err := walletLog.CreateWalletLog(); err != nil {
 			log.Printf("Error creating wallet log: %v\n", err)
 		}
-	}(c.Request.Context())
+	}()
 
 	status.HandleSuccessData(c, "balance retrieved successfully", response)
 }

@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	"fmt"
 	jwt "github.com/emmadal/feeti-module/auth"
 	status "github.com/emmadal/feeti-module/status"
@@ -64,7 +63,7 @@ func WithdrawWallet(c *gin.Context) {
 	//}(c.Request.Context())
 
 	// Create a withdrawal log
-	go func(c context.Context) {
+	go func() {
 		walletLog := models.WalletLog{
 			UserID:         body.UserID,
 			WalletID:       wallet.ID,
@@ -78,7 +77,7 @@ func WithdrawWallet(c *gin.Context) {
 		if err := walletLog.CreateWalletLog(); err != nil {
 			fmt.Printf("Failed to create withdrawal log: %v\n", err)
 		}
-	}(c.Request.Context())
+	}()
 
 	// return response
 	status.HandleSuccessData(c, "withdrawal successful", models.WalletResponse{

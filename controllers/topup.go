@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	"fmt"
 	jwt "github.com/emmadal/feeti-module/auth"
 	status "github.com/emmadal/feeti-module/status"
@@ -44,7 +43,7 @@ func TopupWallet(c *gin.Context) {
 	}
 
 	// Create topup log
-	go func(c context.Context) {
+	go func() {
 		walletLog := models.WalletLog{
 			UserID:         body.UserID,
 			WalletID:       wallet.ID,
@@ -58,7 +57,7 @@ func TopupWallet(c *gin.Context) {
 		if err := walletLog.CreateWalletLog(); err != nil {
 			fmt.Printf("Failed to log topup activity for user %d: %v\n", body.UserID, err)
 		}
-	}(c.Request.Context())
+	}()
 
 	// return success response
 	status.HandleSuccessData(c, "wallet topup successful", models.WalletResponse{

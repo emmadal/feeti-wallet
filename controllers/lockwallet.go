@@ -1,7 +1,6 @@
 package controllers
 
 import (
-	"context"
 	jwt "github.com/emmadal/feeti-module/auth"
 	status "github.com/emmadal/feeti-module/status"
 	"github.com/emmadal/feeti-wallet/models"
@@ -49,7 +48,7 @@ func LockWalletByUser(c *gin.Context) {
 	}
 
 	// Create a withdrawal log
-	go func(ctx context.Context) {
+	go func() {
 		walletLog := models.WalletLog{
 			UserID:         body.UserID,
 			WalletID:       wallet.ID,
@@ -63,7 +62,7 @@ func LockWalletByUser(c *gin.Context) {
 		if err := walletLog.CreateWalletLog(); err != nil {
 			log.Printf("Error creating wallet log: %v\n", err)
 		}
-	}(c.Request.Context()) // Pass the context to the goroutine
+	}() // Pass the context to the goroutine
 
 	status.HandleSuccess(c, "wallet locked successfully")
 }
