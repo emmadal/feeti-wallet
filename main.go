@@ -56,7 +56,6 @@ func main() {
 			},
 		),
 	)
-	server.Use(middleware.Helmet())
 	server.Use(gzip.Gzip(gzip.BestCompression))
 	server.Use(middleware.Timeout(5 * time.Second))
 	server.Use(middleware.Recover())
