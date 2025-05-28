@@ -3,7 +3,7 @@ module github.com/emmadal/feeti-wallet
 go 1.24.3
 
 require (
-	github.com/emmadal/feeti-module v0.0.0-20250528114050-37bd24e72612
+	github.com/emmadal/feeti-module v0.0.0-20250528160938-5d936f330bbc
 	github.com/gin-contrib/cors v1.7.5
 	github.com/gin-contrib/gzip v1.2.3
 	github.com/gin-gonic/gin v1.10.1

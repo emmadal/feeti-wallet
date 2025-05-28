@@ -12,6 +12,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/emmadal/feeti-module v0.0.0-20250528114050-37bd24e72612 h1:Nf6aJOcm7uZtraHAYRgvAiMeluwWbiezlmlr+CYHBEg=
 github.com/emmadal/feeti-module v0.0.0-20250528114050-37bd24e72612/go.mod h1:t5YELNXObQ5TzyFxZwlZ1jRTNgvtQTIMMQXEb5JTOj0=
+github.com/emmadal/feeti-module v0.0.0-20250528160938-5d936f330bbc h1:Unr0fQmveVkWZtO54IJKz7uoiAujywenOkRkA2OLMdI=
+github.com/emmadal/feeti-module v0.0.0-20250528160938-5d936f330bbc/go.mod h1:t5YELNXObQ5TzyFxZwlZ1jRTNgvtQTIMMQXEb5JTOj0=
 github.com/gabriel-vasile/mimetype v1.4.9 h1:5k+WDwEsD9eTLL8Tz3L0VnmVh9QxGjRmjBvAG7U/oYY=
 github.com/gabriel-vasile/mimetype v1.4.9/go.mod h1:WnSQhFKJuBlRyLiKohA/2DtIlPFAbguNaG7QCHcyGok=
 github.com/gin-contrib/cors v1.7.5 h1:cXC9SmofOrRg0w9PigwGlHG3ztswH6bqq4vJVXnvYMk=
