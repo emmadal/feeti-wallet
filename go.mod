@@ -3,25 +3,22 @@ module github.com/emmadal/feeti-wallet
 go 1.24.3
 
 require (
-	github.com/emmadal/feeti-module v0.0.0-20250518122055-b6609ae4e36d
+	github.com/emmadal/feeti-module v0.0.0-20250528114050-37bd24e72612
 	github.com/gin-contrib/cors v1.7.5
 	github.com/gin-contrib/gzip v1.2.3
-	github.com/gin-contrib/timeout v1.0.2
 	github.com/gin-gonic/gin v1.10.1
 	github.com/jackc/pgx/v5 v5.7.5
-	github.com/jeffotoni/quick v0.0.0-20250512165430-2c65ac40bbfd
 	github.com/joho/godotenv v1.5.1
 	github.com/nats-io/nats.go v1.42.0
-	github.com/stretchr/testify v1.10.0
 )
 
 require (
 	github.com/bytedance/sonic v1.13.2 // indirect
 	github.com/bytedance/sonic/loader v0.2.4 // indirect
 	github.com/cloudwego/base64x v0.1.5 // indirect
-	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.9 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
+	github.com/gin-contrib/timeout v1.0.2 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.26.0 // indirect
@@ -41,7 +38,6 @@ require (
 	github.com/nats-io/nkeys v0.4.11 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/ugorji/go/codec v1.2.12 // indirect
 	golang.org/x/arch v0.17.0 // indirect
