@@ -126,50 +126,6 @@ jobs:
             kubectl label namespace ingress-nginx name=ingress-nginx --overwrite || true
           ENDSSH
 
-      - name: Prepare TLS secrets
-        run: |
-          ssh -o StrictHostKeyChecking=no -o ServerAliveInterval=30 -o ServerAliveCountMax=60 -p 22 ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'ENDSSH'
-            # Create TLS secret for HTTPS
-            echo "Creating TLS secret from Let's Encrypt certificates..."
-            
-            # Path to Let's Encrypt certificates
-            CERT_PATH="/etc/letsencrypt/live/${{ secrets.HOST_URL }}"
-            
-            # Check if certificates exist
-            if [ -d "$CERT_PATH" ]; then
-              # Check if we have read permissions, if not use sudo to copy to a temporary location
-              if [ ! -r "$CERT_PATH/fullchain.pem" ] || [ ! -r "$CERT_PATH/privkey.pem" ]; then
-                echo "Copying certificates to temporary location with sudo..."
-                sudo cp "$CERT_PATH/fullchain.pem" /tmp/fullchain.pem
-                sudo cp "$CERT_PATH/privkey.pem" /tmp/privkey.pem
-                sudo chmod 644 /tmp/fullchain.pem /tmp/privkey.pem
-                
-                # Create TLS secret using temporary files
-                kubectl create secret tls feeti-tls \
-                  --cert=/tmp/fullchain.pem \
-                  --key=/tmp/privkey.pem \
-                  --namespace=feeti-wallet \
-                  --dry-run=client -o yaml | kubectl apply -f -
-                
-                # Clean up temporary files
-                rm -f /tmp/fullchain.pem /tmp/privkey.pem
-              else
-                # Create TLS secret directly
-                kubectl create secret tls feeti-tls \
-                  --cert="$CERT_PATH/fullchain.pem" \
-                  --key="$CERT_PATH/privkey.pem" \
-                  --namespace=feeti-wallet \
-                  --dry-run=client -o yaml | kubectl apply -f -
-              fi
-              
-              echo "TLS secret 'feeti-tls' created successfully in wallet namespace."
-            else
-              echo "ERROR: Let's Encrypt certificates not found at $CERT_PATH"
-              echo "Please ensure that Let's Encrypt certificates are properly installed."
-              exit 1
-            fi
-          ENDSSH
-
       - name: Generate Kubernetes manifests
         run: |
           # Create manifests directory
@@ -256,7 +212,7 @@ jobs:
             type: NodePort
           EOF
           
-          # Generate ingress.yaml for API routing with SSL
+          # Generate ingress.yaml for API routing without SSL
           cat <<EOF > ./k8s-wallet/ingress.yaml
           apiVersion: networking.k8s.io/v1
           kind: Ingress
@@ -264,15 +220,9 @@ jobs:
             name: wallet-service-ingress
             namespace: feeti-wallet
             annotations:
-              nginx.ingress.kubernetes.io/ssl-redirect: "true"
-              nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
               nginx.ingress.kubernetes.io/proxy-body-size: "10m"
           spec:
             ingressClassName: nginx
-            tls:
-            - hosts:
-              - vmi2625233.contaboserver.net
-              secretName: feeti-tls
             rules:
             - host: vmi2625233.contaboserver.net
               http:
@@ -286,22 +236,15 @@ jobs:
                         number: 3000
           EOF
           
-          # Generate wallet-ingress.yaml for health checks with SSL
+          # Generate wallet-ingress.yaml for health checks without SSL
           cat <<EOF > ./k8s-wallet/wallet-ingress.yaml
           apiVersion: networking.k8s.io/v1
           kind: Ingress
           metadata:
             name: wallet-healthz-ingress
             namespace: feeti-wallet
-            annotations:
-              nginx.ingress.kubernetes.io/ssl-redirect: "true"
-              nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
           spec:
             ingressClassName: nginx
-            tls:
-            - hosts:
-              - vmi2625233.contaboserver.net
-              secretName: feeti-tls
             rules:
             - host: vmi2625233.contaboserver.net
               http:
@@ -615,21 +558,16 @@ jobs:
             echo "Checking Ingress configuration details:"
             kubectl -n feeti-wallet describe ingress
             
-            echo "Testing SSL certificate configuration..."
-            # Check if curl with https works (verifying SSL setup)
-            kubectl -n feeti-wallet run curl-test-ssl --image=curlimages/curl --rm -i --restart=Never -- \
-              curl --max-time 10 -v -k https://${{ secrets.HOST_URL }}/api/v1/wallet/healthz || echo "HTTPS test failed"
-            
             echo "Deployment completed successfully. Your service should be available at:"
-            echo "For API: https://${{ secrets.HOST_URL }}/api/v1/wallet"
-            echo "For health endpoint: https://${{ secrets.HOST_URL }}/wallet/healthz"
+            echo "For API: http://${{ secrets.HOST_URL }}/api/v1/wallet"
+            echo "For health endpoint: http://${{ secrets.HOST_URL }}/wallet/healthz"
           ENDSSH
 
       - name: Send success notification
         if: success()
         run: |
-          echo "Successfully deployed wallet-service with HTTPS."
-          echo "Service is now available at https://${{ secrets.HOST_URL }}/api/v1/wallet"
+          echo "Successfully deployed wallet-service."
+          echo "Service is now available at http://${{ secrets.HOST_URL }}/api/v1/wallet"
           
           # You can add other notification methods here (Slack, Discord, etc.)
 
