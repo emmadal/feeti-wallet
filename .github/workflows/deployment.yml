@@ -328,6 +328,11 @@ jobs:
                       secretKeyRef:
                         name: wallet-secrets
                         key: DATABASE_URL
+                  - name: DOMAIN
+                    valueFrom:
+                      secretKeyRef:
+                        name: wallet-secrets
+                        key: DOMAIN
                   startupProbe:
                     httpGet:
                       path: /api/v1/healthz
@@ -462,6 +467,7 @@ jobs:
               --from-literal=DATABASE_URL='${{ secrets.DATABASE_URL }}' \
               --from-literal=HOST_URL='${{ secrets.HOST_URL }}' \
               --from-literal=NATS_URL='${{ secrets.NATS_URL }}' \
+              --from-literal=DOMAIN='${{ secrets.DOMAIN }}' \
               --from-literal=GIN_MODE='release' \
               --from-literal=PORT=':3000' \
               --dry-run=client -o yaml | kubectl apply -f -
