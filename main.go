@@ -67,9 +67,9 @@ func main() {
 	s := &http.Server{
 		Handler:        server,
 		Addr:           port,
-		WriteTimeout:   10 * time.Second,
-		ReadTimeout:    10 * time.Second,
-		IdleTimeout:    20 * time.Second,
+		WriteTimeout:   30 * time.Second,
+		ReadTimeout:    30 * time.Second,
+		IdleTimeout:    60 * time.Second,
 		MaxHeaderBytes: 1 << 20, // 1 MB
 	}
 
