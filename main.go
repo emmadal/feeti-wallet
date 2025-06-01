@@ -57,7 +57,7 @@ func main() {
 		),
 	)
 	server.Use(gzip.Gzip(gzip.BestCompression))
-	server.Use(middleware.Timeout(5 * time.Second))
+	server.Use(middleware.Timeout(30 * time.Second))
 	server.Use(middleware.Recover())
 
 	// Set api version group
