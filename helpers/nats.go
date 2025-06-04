@@ -326,8 +326,7 @@ func subscribeToDisableWallet(wg *sync.WaitGroup) error {
 
 		// Create a wallet with a retry mechanism
 		wallet := models.Wallet{UserID: request.UserID}
-		var err error
-		err = wallet.DeleteWallet()
+		err := wallet.DeleteWallet()
 		if err != nil {
 			log.Printf("Failed to disable wallet for user id [%s]: %v\n", request.UserID, err)
 			sendResponse(msg, ResponsePayload{
