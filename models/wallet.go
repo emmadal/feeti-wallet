@@ -3,15 +3,16 @@ package models
 import (
 	"context"
 	"fmt"
+	"github.com/google/uuid"
 	"time"
 )
 
 // Wallet is the struct for a wallet
 type Wallet struct {
-	ID        int64     `json:"id" db:"id,omitempty"`
-	UserID    int64     `json:"user_id" db:"user_id" binding:"required,number,gt=0"`
+	ID        uuid.UUID `json:"id" db:"id,omitempty"`
+	UserID    uuid.UUID `json:"user_id" db:"user_id" binding:"required"`
 	Balance   int64     `json:"balance" db:"balance"`
-	Currency  string    `json:"currency" db:"currency" binding:"alpha,oneof=XAF"`
+	Currency  string    `json:"currency" db:"currency" binding:"alpha,oneof=XAF,USD,XOF"`
 	Locked    bool      `json:"locked" db:"locked"`
 	IsActive  bool      `json:"is_active" db:"is_active"`
 	CreatedAt time.Time `json:"created_at" db:"created_at,omitempty"`
@@ -20,9 +21,9 @@ type Wallet struct {
 
 // WalletLog is the struct for a wallet log
 type WalletLog struct {
-	ID             int64     `json:"id" db:"id,omitempty"`
-	UserID         int64     `json:"user_id" db:"user_id"`
-	WalletID       int64     `json:"wallet_id" db:"wallet_id"`
+	ID             uuid.UUID `json:"id" db:"id,omitempty"`
+	UserID         uuid.UUID `json:"user_id" db:"user_id"`
+	WalletID       uuid.UUID `json:"wallet_id" db:"wallet_id"`
 	Activity       string    `json:"activity" db:"activity"`
 	OldBalance     int64     `json:"old_balance" db:"old_balance"`
 	NewBalance     int64     `json:"new_balance" db:"new_balance"`
@@ -34,35 +35,35 @@ type WalletLog struct {
 
 // WalletResponse is the struct for a wallet response
 type WalletResponse struct {
-	ID       int64  `json:"id"`
-	Currency string `json:"currency"`
-	Balance  int64  `json:"balance"`
+	ID       uuid.UUID `json:"id"`
+	Currency string    `json:"currency"`
+	Balance  int64     `json:"balance"`
 }
 
 // Request is the struct for a request
 type Request struct {
-	Amount   int64 `json:"amount" binding:"required,numeric,gt=0,min=100,max=2000000"`
-	UserID   int64 `json:"user_id" binding:"required,gt=0,numeric"`
-	WalletID int64 `json:"wallet_id" binding:"required,gt=0,numeric"`
+	Amount   int64     `json:"amount" binding:"required,numeric,gt=0,min=100,max=2000000"`
+	UserID   uuid.UUID `json:"user_id" binding:"required"`
+	WalletID uuid.UUID `json:"wallet_id" binding:"required"`
 }
 
 // LockRequest is the struct for a lock request
 type LockRequest struct {
-	UserID   int64 `json:"user_id" binding:"required,gt=0,numeric"`
-	WalletID int64 `json:"wallet_id" binding:"required,gt=0,numeric"`
+	UserID   uuid.UUID `json:"user_id" binding:"required"`
+	WalletID uuid.UUID `json:"wallet_id" binding:"required"`
 }
 
-// UnLockRequest is the struct for a unlock request
+// UnLockRequest is the struct for an unlocked request
 type UnLockRequest struct {
-	UserID   int64 `json:"user_id" binding:"required,gt=0,numeric"`
-	WalletID int64 `json:"wallet_id" binding:"required,gt=0,numeric"`
+	UserID   uuid.UUID `json:"user_id" binding:"required"`
+	WalletID uuid.UUID `json:"wallet_id" binding:"required"`
 }
 
 // WithdrawRequest is the struct for a withdrawal request
 type WithdrawRequest struct {
-	Amount   int64 `json:"amount" binding:"required,numeric,gt=0,min=100,max=2000000"`
-	UserID   int64 `json:"user_id" binding:"required,gt=0,numeric"`
-	WalletID int64 `json:"wallet_id" binding:"required,gt=0,numeric"`
+	Amount   int64     `json:"amount" binding:"required,numeric,gt=0,min=100,max=2000000"`
+	UserID   uuid.UUID `json:"user_id" binding:"required"`
+	WalletID uuid.UUID `json:"wallet_id" binding:"required"`
 }
 
 // CreateWallet creates a new wallet

@@ -12,8 +12,8 @@ func createTables() error {
 
 	queries := []string{
 		`CREATE TABLE IF NOT EXISTS wallets (
-			id SERIAL PRIMARY KEY,
-			user_id BIGINT NOT NULL,
+			id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id UUID NOT NULL,
 			balance BIGINT DEFAULT 0 NOT NULL,
 			currency VARCHAR(3) DEFAULT 'XAF' NOT NULL,
     		locked BOOLEAN DEFAULT FALSE,
@@ -21,9 +21,9 @@ func createTables() error {
 			created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 		);`,
 		`CREATE TABLE IF NOT EXISTS wallet_logs (
-    		id SERIAL PRIMARY KEY,
-    		user_id BIGINT NOT NULL,
-    		wallet_id BIGINT NOT NULL,
+    		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    		user_id UUID NOT NULL,
+    		wallet_id UUID NOT NULL,
     		activity VARCHAR(50) NOT NULL, -- 'creation', 'balance_check', 'debit', etc.
     		old_balance BIGINT NOT NULL,
     		new_balance BIGINT NOT NULL,

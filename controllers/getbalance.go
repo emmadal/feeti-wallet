@@ -3,44 +3,30 @@ package controllers
 import (
 	jwt "github.com/emmadal/feeti-module/auth"
 	status "github.com/emmadal/feeti-module/status"
-	"github.com/emmadal/feeti-wallet/helpers"
 	"github.com/emmadal/feeti-wallet/models"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"log"
 	"net/http"
-	"strconv"
 )
 
 // GetBalanceByUser get balance by user
 func GetBalanceByUser(c *gin.Context) {
 	// get user_id from url
-	userID := c.Param("userID")
-	if userID == "" {
+	ctxUserID := c.Param("userID")
+	if ctxUserID == "" {
 		status.HandleError(c, http.StatusBadRequest, "userID is required", nil)
 		return
 	}
 
-	// check if user_id is a number
-	if !helpers.IsNumericRequestID(userID) {
-		status.HandleError(c, http.StatusBadRequest, "incorrect parameters", nil)
+	// parse userID and verify user identity with context data
+	userID := uuid.MustParse(ctxUserID)
+	if userID != jwt.GetUserIDFromGin(c) {
+		status.HandleError(c, http.StatusForbidden, "Forbidden request", nil)
 		return
 	}
 
-	// convert userID to int64
-	userIDInt64, err := strconv.ParseInt(userID, 10, 64)
-	if err != nil {
-		status.HandleError(c, http.StatusBadRequest, "invalid parameters", nil)
-		return
-	}
-
-	// verify user identity with context data
-	id, _ := jwt.GetUserIDFromGin(c)
-	if userIDInt64 != id {
-		status.HandleError(c, http.StatusForbidden, "Unauthorized user", nil)
-		return
-	}
-
-	wallet := models.Wallet{UserID: userIDInt64}
+	wallet := models.Wallet{UserID: userID}
 
 	// get wallet balance
 	wl, err := wallet.GetBalance()
@@ -57,7 +43,7 @@ func GetBalanceByUser(c *gin.Context) {
 	// record wallet log
 	go func() {
 		walletLog := models.WalletLog{
-			UserID:         userIDInt64,
+			UserID:         userID,
 			WalletID:       wl.ID,
 			Activity:       "GET_BALANCE",
 			OldBalance:     wl.Balance,

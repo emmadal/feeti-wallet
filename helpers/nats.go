@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/emmadal/feeti-module/subject"
 	"github.com/emmadal/feeti-wallet/models"
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 	"log"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -118,22 +119,22 @@ func NatsConnect() error {
 			// Check for errors
 			for i, err := range []error{err1, err2, err3, err4, err5, err6} {
 				if err != nil {
-					subject := ""
+					topic := ""
 					switch i {
 					case 0:
-						subject = "wallet.create"
+						topic = subject.SubjectWalletCreate
 					case 1:
-						subject = "wallet.disable"
+						topic = subject.SubjectWalletDisable
 					case 2:
-						subject = "wallet.balance"
+						topic = subject.SubjectWalletBalance
 					case 3:
-						subject = "wallet.check_balance"
+						topic = subject.SubjectWalletCheckBalance
 					case 4:
-						subject = "wallet.deposit"
+						topic = subject.SubjectWalletDeposit
 					case 5:
-						subject = "wallet.withdraw"
+						topic = subject.SubjectWalletWithdraw
 					}
-					log.Printf("Failed to subscribe to %s: %v\n", subject, err)
+					log.Printf("Failed to subscribe to %s: %v\n", topic, err)
 				}
 			}
 			log.Println("All NATS subscriptions established")
@@ -220,7 +221,7 @@ func subscribeToCreateWallet(wg *sync.WaitGroup) error {
 	defer wg.Done()
 
 	// Subscribe to the "wallet.create" subject
-	sub, err := nc.Subscribe("wallet.create", func(msg *nats.Msg) {
+	sub, err := nc.Subscribe(subject.SubjectWalletCreate, func(msg *nats.Msg) {
 		startTime := time.Now()
 		log.Printf("Received message [%s] on subject %s\n", string(msg.Data), msg.Subject)
 
@@ -236,29 +237,28 @@ func subscribeToCreateWallet(wg *sync.WaitGroup) error {
 		}()
 
 		// Parse the message payload
-		userId := string(msg.Data)
-		id, err := strconv.ParseInt(userId, 10, 64)
+		userID, err := uuid.ParseBytes(msg.Data)
 		if err != nil {
-			log.Printf("Invalid user ID: %s\n", userId)
+			log.Printf("Failed to parse user id: %v\n", err)
 			sendResponse(msg, ResponsePayload{
 				Success: false,
-				Error:   "Invalid user ID: must be a number",
+				Error:   fmt.Sprintf("Failed to parse user id: %v", err),
 			})
 			return
 		}
 
 		// Create a wallet with a retry mechanism
-		wallet := models.Wallet{UserID: id}
+		wallet := models.Wallet{UserID: userID}
 		newWallet, err := wallet.CreateWallet()
 		if err != nil {
-			log.Printf("Failed to create wallet for user id [%d]: %v\n", id, err)
+			log.Printf("Failed to create wallet for user id [%s]: %v\n", userID, err)
 			sendResponse(msg, ResponsePayload{
 				Success: false,
-				Error:   fmt.Sprintf("Failed to create wallet for user id [%d]: %v", id, err),
+				Error:   fmt.Sprintf("Failed to create wallet for user id [%s]: %v", userID, err),
 			})
 			return
 		}
-		log.Printf("Wallet for user id [%d] created successfully in %v\n", id, time.Since(startTime))
+		log.Printf("Wallet for user id [%s] created successfully in %v\n", userID, time.Since(startTime))
 
 		// Send success response
 		sendResponse(msg, ResponsePayload{
@@ -282,11 +282,12 @@ func subscribeToCreateWallet(wg *sync.WaitGroup) error {
 	return nil
 }
 
+// subscribeToDisableWallet disables a wallet when a message is received
 func subscribeToDisableWallet(wg *sync.WaitGroup) error {
 	defer wg.Done()
 
 	// Subscribe to the "wallet.disable" subject
-	sub, err := nc.Subscribe("wallet.disable", func(msg *nats.Msg) {
+	sub, err := nc.Subscribe(subject.SubjectWalletDisable, func(msg *nats.Msg) {
 		startTime := time.Now()
 		log.Printf("Received message [%s] on subject %s\n", string(msg.Data), msg.Subject)
 
@@ -302,29 +303,40 @@ func subscribeToDisableWallet(wg *sync.WaitGroup) error {
 		}()
 
 		// Parse the message payload
-		userId := string(msg.Data)
-		id, err := strconv.ParseInt(userId, 10, 64)
-		if err != nil {
-			log.Printf("Invalid user ID: %s\n", userId)
+		var request struct {
+			UserID uuid.UUID `json:"user_id"`
+		}
+		if err := json.Unmarshal(msg.Data, &request); err != nil {
+			log.Printf("Failed to unmarshal disable wallet request: %v\n", err)
 			sendResponse(msg, ResponsePayload{
 				Success: false,
-				Error:   "Invalid user ID: must be a number",
+				Error:   fmt.Sprintf("Failed to parse request: %v", err),
+			})
+			return
+		}
+
+		if request.UserID == uuid.Nil {
+			log.Printf("Invalid user ID: cannot be nil\n")
+			sendResponse(msg, ResponsePayload{
+				Success: false,
+				Error:   "Invalid user ID: cannot be nil",
 			})
 			return
 		}
 
 		// Create a wallet with a retry mechanism
-		wallet := models.Wallet{UserID: id}
+		wallet := models.Wallet{UserID: request.UserID}
+		var err error
 		err = wallet.DeleteWallet()
 		if err != nil {
-			log.Printf("Failed to disable wallet for user id [%d]: %v\n", id, err)
+			log.Printf("Failed to disable wallet for user id [%s]: %v\n", request.UserID, err)
 			sendResponse(msg, ResponsePayload{
 				Success: false,
-				Error:   fmt.Sprintf("Failed to disable wallet for user id [%d]: %v", id, err),
+				Error:   fmt.Sprintf("Failed to disable wallet for user id [%s]: %v", request.UserID, err),
 			})
 			return
 		}
-		log.Printf("Wallet for user id [%d] disabled successfully in %v\n", id, time.Since(startTime))
+		log.Printf("Wallet for user id [%s] disabled successfully in %v\n", request.UserID, time.Since(startTime))
 
 		// Send success response
 		sendResponse(msg, ResponsePayload{
@@ -348,11 +360,12 @@ func subscribeToDisableWallet(wg *sync.WaitGroup) error {
 	return nil
 }
 
+// subscribeToGetBalance gets the balance of a wallet when a message is received
 func subscribeToGetBalance(wg *sync.WaitGroup) error {
 	defer wg.Done()
 
 	// Subscribe to the "wallet.balance" subject
-	sub, err := nc.Subscribe("wallet.balance", func(msg *nats.Msg) {
+	sub, err := nc.Subscribe(subject.SubjectWalletBalance, func(msg *nats.Msg) {
 		startTime := time.Now()
 		log.Printf("Received message [%s] on subject %s\n", string(msg.Data), msg.Subject)
 
@@ -368,29 +381,28 @@ func subscribeToGetBalance(wg *sync.WaitGroup) error {
 		}()
 
 		// Parse the message payload
-		userId := string(msg.Data)
-		id, err := strconv.ParseInt(userId, 10, 64)
+		userID, err := uuid.ParseBytes(msg.Data)
 		if err != nil {
-			log.Printf("Invalid user ID: %s\n", userId)
+			log.Printf("Failed to parse user id: %v\n", err)
 			sendResponse(msg, ResponsePayload{
 				Success: false,
-				Error:   "Invalid user ID: must be a number",
+				Error:   fmt.Sprintf("Failed to parse user id: %v", err),
 			})
 			return
 		}
 
 		// Create a wallet with a retry mechanism
-		wallet := models.Wallet{UserID: id}
+		wallet := models.Wallet{UserID: userID}
 		balance, err := wallet.GetBalance()
 		if err != nil {
-			log.Printf("Failed to get balance for user id [%d]: %v\n", id, err)
+			log.Printf("Failed to get balance for user id [%s]: %v\n", userID, err)
 			sendResponse(msg, ResponsePayload{
 				Success: false,
-				Error:   fmt.Sprintf("Failed to get balance for user id [%d]: %v", id, err),
+				Error:   fmt.Sprintf("Failed to get balance for user id [%s]: %v", userID, err),
 			})
 			return
 		}
-		log.Printf("Balance for user id [%d] retrieved successfully in %v\n", id, time.Since(startTime))
+		log.Printf("Balance for user id [%s] retrieved successfully in %v\n", userID, time.Since(startTime))
 
 		// Send success response
 		sendResponse(msg, ResponsePayload{
@@ -417,12 +429,12 @@ func subscribeToGetBalance(wg *sync.WaitGroup) error {
 func subscribeToCheckBalance(wg *sync.WaitGroup) error {
 	defer wg.Done()
 	type Payload struct {
-		UserId int64 `json:"user_id"`
-		Amount int64 `json:"amount"`
+		UserId uuid.UUID `json:"user_id"`
+		Amount int64     `json:"amount"`
 	}
 
 	// Subscribe to the "wallet.check_balance" subject
-	sub, err := nc.Subscribe("wallet.check_balance", func(msg *nats.Msg) {
+	sub, err := nc.Subscribe(subject.SubjectWalletCheckBalance, func(msg *nats.Msg) {
 		startTime := time.Now()
 		log.Printf("Received message [%s] on subject %s\n", string(msg.Data), msg.Subject)
 
@@ -494,10 +506,11 @@ func subscribeToCheckBalance(wg *sync.WaitGroup) error {
 	return nil
 }
 
+// subscribeToDeposit deposits funds on the wallet balance
 func subscribeToDeposit(wg *sync.WaitGroup) error {
 	defer wg.Done()
 	// Subscribe to the "wallet.deposit" subject
-	sub, err := nc.Subscribe("wallet.deposit", func(msg *nats.Msg) {
+	sub, err := nc.Subscribe(subject.SubjectWalletDeposit, func(msg *nats.Msg) {
 		startTime := time.Now()
 		log.Printf("Received message [%s] on subject %s\n", string(msg.Data), msg.Subject)
 
@@ -559,10 +572,11 @@ func subscribeToDeposit(wg *sync.WaitGroup) error {
 	return nil
 }
 
+// subscribeToWithdraw withdraws funds from the wallet
 func subscribeToWithdraw(wg *sync.WaitGroup) error {
 	defer wg.Done()
 	// Subscribe to the "wallet.withdraw" subject
-	sub, err := nc.Subscribe("wallet.withdraw", func(msg *nats.Msg) {
+	sub, err := nc.Subscribe(subject.SubjectWalletWithdraw, func(msg *nats.Msg) {
 		startTime := time.Now()
 		log.Printf("Received message [%s] on subject %s\n", string(msg.Data), msg.Subject)
 

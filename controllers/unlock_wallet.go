@@ -20,9 +20,8 @@ func UnLockWalletByUser(c *gin.Context) {
 	}
 
 	// verify user identity with context data
-	id, _ := jwt.GetUserIDFromGin(c)
-	if body.UserID != id {
-		status.HandleError(c, http.StatusForbidden, "Unauthorized user", nil)
+	if body.UserID != jwt.GetUserIDFromGin(c) {
+		status.HandleError(c, http.StatusForbidden, "Forbidden request", nil)
 		return
 	}
 
